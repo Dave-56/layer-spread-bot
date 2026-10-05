@@ -297,7 +297,7 @@ class BestBody(BaseModel):
 
 def _best_view(m: Match, r: Any) -> dict[str, Any]:
     """The SDK's BestOrder as it is, plus ``compare``: the same comparison named and labelled for the app."""
-    return {**r.to_dict(), "compare": compare_view(m, r.why)}
+    return {**r.to_dict(), "compare": compare_view(m, r.why, client().rules.price_collar)}
 
 
 @app.get("/strategies")

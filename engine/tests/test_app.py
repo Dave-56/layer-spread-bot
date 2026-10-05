@@ -112,6 +112,8 @@ def test_preview_found_by_ticker_alone_and_labelled(engine, monkeypatch: pytest.
         return Match.model_validate(MADE_UP)
 
     class _C:
+        rules = type("Rules", (), {"price_collar": 0.05})  # the SDK default
+
         def preview_best(self, m, side, size, max_price=None):  # noqa: ANN001, ANN202
             return _best(m)
 
@@ -338,6 +340,8 @@ def test_preview_reads_again_once_when_a_book_was_too_old(engine, monkeypatch: p
     answers = [stale, fresh]
 
     class _C:
+        rules = type("Rules", (), {"price_collar": 0.05})  # the SDK default
+
         def preview_best(self, m, side, size, max_price=None):  # noqa: ANN001, ANN202
             return answers.pop(0)
 
