@@ -1,0 +1,83 @@
+"""Smoke test: every engine route against the real venues, in paper mode. Sends no real orders.
+
+    cd engine && uv run python scripts/smoke.py --q nfl
+
+Needs LAYER_API_KEY and a Kalshi key in .env (Kalshi books are read with your own key).
+Prints what each route returned, never a key.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+
+import tempfile  # noqa: E402
+
+os.environ["BOT_MODE"] = "paper"  # this script never runs live, whatever .env says
+# Its own throwaway paper account, so smoke trades never land in yours.
+os.environ["BOT_STORE_DIR"] = tempfile.mkdtemp(prefix="spread-smoke-")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from spread_engine.app import app  # noqa: E402
+
+
+def show(label: str, started: float, body: object) -> None:
+    print(f"\n== {label} ({time.monotonic() - started:.1f}s)")
+    print(json.dumps(body, indent=1, default=str)[:4000])
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--q", default=None)
+    ap.add_argument("--limit", type=int, default=8)
+    ap.add_argument("--size", type=int, default=10)
+    args = ap.parse_args()
+    c = TestClient(app)
+
+    t = time.monotonic()
+    st = c.get("/status").json()
+    show("status", t, st)
+    assert st["mode"] == "paper", "smoke runs in paper mode only"
+
+    t = time.monotonic()
+    r = c.get("/best/signal", params={"q": args.q, "limit": args.limit})
+    show("best/signal (your strategy → both venues compared)", t, r.json())
+    sig = r.json().get("signal")
+
+    if sig:
+        t = time.monotonic()
+        body = {"match_id": sig["match_id"], "side": sig["side"], "size": args.size}
+        r = c.post("/best/buy", json=body)
+        show(f"best/buy {args.size} (paper)", t, r.json())
+
+    t = time.monotonic()
+    rows = []
+    with c.stream("POST", "/arb/scan", json={"q": args.q, "limit": args.limit, "size": args.size}) as s:
+        for line in s.iter_lines():
+            if line:
+                rows.append(json.loads(line))
+    done = rows[-1]
+    print(f"\n== arb/scan ({time.monotonic() - t:.1f}s): {done}")
+    for e in rows:
+        if e["type"] == "row":
+            q = e["quote"] or {}
+            print(
+                f"  {e['verdict']:15} {e['match']['id']:45} gross@best={q.get('gross_at_best')} "
+                f"net@best={q.get('edge_at_best')} contracts={q.get('contracts')} rpd={q.get('return_per_day_pct')} | {e['reason']}"
+            )
+    survivors = [e for e in rows if e.get("verdict") == "survivor"]
+    if survivors:
+        t = time.monotonic()
+        r = c.post("/arb/trade", json={"match_id": survivors[0]["match"]["id"], "size": args.size})
+        show("arb/trade (paper)", t, r.json())
+    else:
+        print("\n== arb/trade skipped: no survivor (fees say no trade)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
