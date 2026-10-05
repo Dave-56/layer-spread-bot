@@ -143,9 +143,9 @@ describe("bestHeadline", () => {
 });
 
 describe("Best venue's ways in", () => {
-  it("opens on Pick a game yourself, with Run a strategy second", () => {
+  it("opens on Search a game, with Every market second and no strategy tab", () => {
     expect(DEFAULT_HOW).toBe("manual");
-    expect(HOW.map((h) => h.label)).toEqual(["Pick a game yourself", "Run a strategy", "Every market"]);
+    expect(HOW.map((h) => h.label)).toEqual(["Search a game", "Every market"]);
   });
 });
 

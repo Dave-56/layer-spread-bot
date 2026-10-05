@@ -13,12 +13,9 @@ import {
   type CompareView,
   type MatchView,
   type Signal,
-  type StrategyInfo,
-  type StrategyList,
 } from "@/lib/engine";
 import { cents, count, money, side, skipText, UNKNOWN_SKIPS, when } from "./format";
 import {
-  alreadyExists,
   bestHeadline,
   DEFAULT_HOW,
   everyCell,
@@ -27,7 +24,6 @@ import {
   HOW,
   matchNote,
   skipLine,
-  strategyNoTrade,
   type How,
 } from "./headlines";
 
@@ -37,8 +33,6 @@ import {
 // The flow: choose (a game by hand, or a strategy) → compare → the match, the two venues' markets
 // side by side, and the answer: where it's cheaper, and by how much. Nothing is sent from here.
 // Every number and label is the engine's (BestResult.compare); nothing is computed here.
-
-const ADD = "__add__"; // the dropdown's last option: add your own .py
 
 // ---- Used by the chat panel and the Arbitrage tab ------------------------------------------------
 
@@ -224,20 +218,6 @@ function Numbers({ c }: { c: CompareView }) {
   );
 }
 
-interface Looked extends MatchView {
-  reason: string;
-}
-
-interface SignalResult {
-  signal: Signal | null;
-  no_trade?: string | null; // the strategy's own sentence, or the engine's when a venue didn't answer
-  unavailable?: boolean; // a venue didn't answer while the strategy read prices: try again
-  matches: number;
-  started?: number;
-  looked?: Looked[];
-  best: BestResult | null;
-}
-
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
   const body = await r.json().catch(() => null);
@@ -381,258 +361,6 @@ function Working({ t, label = "Checking prices on both venues" }: { t: Trade; la
   );
 }
 
-/**
- * The strategy dropdown: every file in strategies/, grouped by category, and "Add your own (.py)…"
- * last. Choosing that opens the file picker: the engine saves the file in strategies/, checks it
- * loads, and it's selected. Cancel goes back to the strategy you had.
- */
-function StrategyPicker({
-  list,
-  cats,
-  pick,
-  onPick,
-  onAdded,
-}: {
-  list: StrategyInfo[];
-  cats: string[];
-  pick: string;
-  onPick: (id: string) => void;
-  onAdded: (b: StrategyList & { added: StrategyInfo }) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [replace, setReplace] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-
-  // Closing the file picker without a file goes back to the strategy you had.
-  useEffect(() => {
-    const el = input.current;
-    const cancel = () => setAdding(false);
-    el?.addEventListener("cancel", cancel);
-    return () => el?.removeEventListener("cancel", cancel);
-  }, []);
-
-  // The starter file (my_strategy.py), saved in the browser: edit it, rename it, add it back.
-  async function download() {
-    try {
-      const b = await getJson<{ filename: string; code: string }>("/engine/strategies/starter");
-      const url = URL.createObjectURL(new Blob([b.code], { type: "text/x-python" }));
-      const a = Object.assign(document.createElement("a"), { href: url, download: b.filename });
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setFailed(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function send(file: File | undefined, again = false) {
-    if (input.current) input.current.value = "";
-    if (!file) return setAdding(false);
-    setUploading(true);
-    setFailed(null);
-    setReplace(null);
-    try {
-      const b = await getJson<StrategyList & { added: StrategyInfo }>(
-        "/engine/strategies",
-        post({ filename: file.name, code: await file.text(), replace: again }),
-      );
-      onAdded(b);
-    } catch (e) {
-      const text = e instanceof Error ? e.message : String(e);
-      setFailed(text);
-      if (alreadyExists(text)) setReplace(file);
-    }
-    setAdding(false);
-    setUploading(false);
-  }
-
-  function choose(id: string) {
-    setFailed(null);
-    setReplace(null);
-    if (id === ADD) {
-      setAdding(true);
-      input.current?.click();
-      return;
-    }
-    setAdding(false);
-    onPick(id);
-  }
-
-  const chosen = list.find((s) => s.id === pick);
-  const groups = cats.map((name) => ({ name, items: list.filter((s) => s.category === name) })).filter((g) => g.items.length);
-  const starter = (
-    <button className="link" onClick={download}>
-      starter file
-    </button>
-  );
-  return (
-    <>
-      <select
-        className="picker"
-        aria-label="Strategy"
-        value={adding ? ADD : pick}
-        onChange={(e) => choose(e.target.value)}
-        disabled={uploading}
-      >
-        {groups.map((g) => (
-          <optgroup key={g.name} label={g.name}>
-            {g.items.map((s) => (
-              <option key={s.id} value={s.id} disabled={!!s.error} title={s.error ?? undefined}>
-                {s.error ? `${s.name} (didn't load)` : s.name}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-        <option value={ADD}>Add your own (.py)…</option>
-      </select>
-      <input ref={input} type="file" accept=".py" hidden onChange={(e) => send(e.target.files?.[0])} />
-      {failed ? (
-        <p className="small desc">
-          <span className="error">{failed}</span>{" "}
-          {replace && (
-            <button className="link" onClick={() => send(replace, true)} disabled={uploading}>
-              Replace it
-            </button>
-          )}{" "}
-          <span className="muted">Start from the {starter}.</span>
-        </p>
-      ) : (
-        <p className="small muted desc">
-          {uploading
-            ? "Adding your file…"
-            : adding
-              ? <>One Python file with <code>decide(matches, client)</code>. Start from the {starter}.</>
-              : chosen
-                ? `${chosen.description}${chosen.example ? " An example, not advice." : ""}`
-                : null}
-        </p>
-      )}
-    </>
-  );
-}
-
-function StrategyMode() {
-  const t = useTrade();
-  const [list, setList] = useState<StrategyInfo[] | null>(null);
-  const [cats, setCats] = useState<string[]>([]);
-  const [pick, setPick] = useState("sports_favorite");
-  const [noTrade, setNoTrade] = useState<{ text: string; retry: boolean } | null>(null);
-  const [looked, setLooked] = useState<Looked[] | null>(null);
-  const [allLooked, setAllLooked] = useState(false);
-  const { fail } = t;
-
-  useEffect(() => {
-    getJson<StrategyList>("/engine/strategies")
-      .then((b) => {
-        setList(b.strategies);
-        setCats(b.categories);
-      })
-      .catch(fail);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function added(b: StrategyList & { added: StrategyInfo }) {
-    setList(b.strategies);
-    setPick(b.added.id);
-  }
-
-  async function run() {
-    t.start();
-    setNoTrade(null);
-    setLooked(null);
-    setAllLooked(false);
-    try {
-      // Each strategy picks its own markets: no search here.
-      const qs = new URLSearchParams({ strategy: pick, limit: "50" });
-      const r = await getJson<SignalResult>(`/engine/best/signal?${qs}`);
-      if (r.signal) t.show(r.signal, "Your strategy picked", r.best);
-      else {
-        setNoTrade({ text: r.no_trade ?? `No trade: ${strategyNoTrade(r)}`, retry: !!r.unavailable });
-        setLooked(r.unavailable ? [] : (r.looked ?? []));
-      }
-    } catch (e) {
-      t.fail(e);
-    }
-    t.setBusy(null);
-  }
-
-  function compareFor(m: MatchView) {
-    t.compare({ match_id: m.id, side: "yes", size: 100, max_price: null, why: "", match: m }, "You picked");
-  }
-
-  const noTradeRef = useShowWhenReady(noTrade);
-  const chosen = list?.find((s) => s.id === pick);
-  const runnable = chosen && !chosen.error;
-  const shown = looked ? (allLooked ? looked : looked.slice(0, 5)) : [];
-  return (
-    <>
-      {list && (
-        <StrategyPicker
-          list={list}
-          cats={cats}
-          pick={pick}
-          onPick={setPick}
-          onAdded={added}
-        />
-      )}
-
-      <div className="controls run">
-        <button className="btn big" onClick={run} disabled={t.busy !== null || !runnable}>
-          {t.busy === "run" ? "Running…" : "Run"}
-        </button>
-      </div>
-
-      <Working t={t} label="Running the strategy, then checking prices on both venues" />
-      {noTrade && (
-        <div className="result" ref={noTradeRef}>
-          <h2 className="headline none">{noTrade.text}</h2>
-          {noTrade.retry && <TryAgain onClick={run} busy={t.busy !== null} />}
-          {shown.length > 0 && (
-            <>
-              <p className="lead">It looked at these. Compare one yourself:</p>
-              <table className="t">
-                <tbody>
-                  {shown.map((m) => (
-                    <tr key={m.id}>
-                      <td>
-                        {m.outcome ?? m.title}
-                        {m.rule_warning && (
-                          <span className="pill warn" style={{ marginLeft: 8 }} title={m.rule_warning}>
-                            rules differ
-                          </span>
-                        )}
-                        <div className="small muted">{m.title}</div>
-                      </td>
-                      <td className="num">
-                        <button className="btn quiet" onClick={() => compareFor(m)} disabled={t.busy !== null}>
-                          Compare
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {!allLooked && looked && looked.length > 5 && (
-                  <tfoot>
-                    <tr>
-                      <td colSpan={2}>
-                        <button className="link" onClick={() => setAllLooked(true)}>
-                          Show all {looked.length}
-                        </button>
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </>
-          )}
-        </div>
-      )}
-      <TradeResult t={t} />
-    </>
-  );
-}
-
 export interface Game {
   key: string;
   title: string;
@@ -653,7 +381,15 @@ export function gamesOf(found: MatchView[]): Game[] {
 }
 
 const gameLabel = (g: Game) => `${g.title}${when(g.time) ? ` · ${when(g.time)}` : ""}`;
-const GAMES_LISTED = 30; // matches per list (a game is 2–3 of them); typing searches every open game
+// Matches per list, soonest first (a game is 2–3 of them); typing searches every open game. Layer
+// sends the titles, so a long list costs no venue requests.
+const GAMES_LISTED = 100;
+
+/** Whether a game's names hold every word typed, e.g. "fal sai" → Falcons vs Saints. */
+const hasWords = (g: Game, words: string) => {
+  const names = [g.title, ...g.outcomes.map((m) => m.outcome ?? "")].join(" ").toLowerCase();
+  return words.toLowerCase().split(/\s+/).every((w) => names.includes(w));
+};
 
 /** Open games on both venues, soonest first, or the ones matching `words`. */
 const listGames = async (words: string) => {
@@ -664,37 +400,44 @@ const listGames = async (words: string) => {
 
 /**
  * One box to find and pick a game: shows the pick, and typing in it searches every open game.
- * The pick stays put while a search runs, so a search that doesn't list it never loses it.
+ * Each letter narrows the soonest games at once; after a pause in typing, the search of every open
+ * game replaces them, with "Searching all games…" until it answers. The pick stays put meanwhile.
  */
-function GamePicker({ picked, onPick, onError }: { picked: Game | null; onPick: (g: Game) => void; onError: (e: unknown) => void }) {
+function GamePicker({
+  picked,
+  soonest,
+  onPick,
+  onError,
+}: {
+  picked: Game | null;
+  soonest: Game[];
+  onPick: (g: Game) => void;
+  onError: (e: unknown) => void;
+}) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
-  const [games, setGames] = useState<Game[] | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [found, setFound] = useState<{ words: string; games: Game[] } | null>(null); // the latest search's answer
   const [active, setActive] = useState(0);
   const asked = useRef(0); // only the latest search's answer is shown
   const box = useRef<HTMLInputElement>(null);
-
-  function search(words: string) {
-    const n = ++asked.current;
-    setSearching(true);
-    listGames(words)
-      .then((gs) => {
-        if (n !== asked.current) return;
-        setGames(gs);
-        setActive(0);
-      })
-      .catch((e) => n === asked.current && onError(e))
-      .finally(() => n === asked.current && setSearching(false));
-  }
+  const words = text.trim();
 
   // Wait for a pause in typing before asking the engine.
   useEffect(() => {
-    if (!open) return;
-    const id = setTimeout(() => search(text), text ? 300 : 0);
+    if (!words) return;
+    const n = ++asked.current;
+    const id = setTimeout(() => {
+      listGames(words)
+        .then((games) => n === asked.current && setFound({ words, games }))
+        .catch((e) => {
+          if (n !== asked.current) return;
+          setFound({ words, games: soonest.filter((g) => hasWords(g, words)) }); // keep what's on screen
+          onError(e);
+        });
+    }, 300);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, open]);
+  }, [words]);
 
   function choose(g: Game) {
     onPick(g);
@@ -702,7 +445,9 @@ function GamePicker({ picked, onPick, onError }: { picked: Game | null; onPick: 
     box.current?.blur(); // closes the list; focusing the box again opens it
   }
 
-  const list = games ?? [];
+  const searched = found?.words === words;
+  const searching = !!words && !searched;
+  const list = !words ? soonest : searched ? found!.games : soonest.filter((g) => hasWords(g, words));
   return (
     <div className="gamebox">
       <input
@@ -715,7 +460,10 @@ function GamePicker({ picked, onPick, onError }: { picked: Game | null; onPick: 
         placeholder={picked ? gameLabel(picked) : "Type a team or league, e.g. yankees, nba"}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          setActive(0);
+        }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") setActive((i) => Math.min(i + 1, list.length - 1));
           else if (e.key === "ArrowUp") setActive((i) => Math.max(i - 1, 0));
@@ -727,9 +475,13 @@ function GamePicker({ picked, onPick, onError }: { picked: Game | null; onPick: 
       />
       {open && (
         <ul className="gamebox-list" id="game-list" role="listbox">
-          {searching && !list.length && <li className="gamebox-note">Searching…</li>}
-          {!searching && games && !list.length && (
-            <li className="gamebox-note">{text.trim() ? "No game on both venues matches that." : "No game is open on both venues right now."}</li>
+          {searching && (
+            <li className="gamebox-note searching">
+              <span className="dot" /> Searching all games…
+            </li>
+          )}
+          {!searching && !list.length && (
+            <li className="gamebox-note">{words ? "No game on both venues matches that." : "No game is open on both venues right now."}</li>
           )}
           {list.map((g, i) => (
             <li
@@ -748,6 +500,7 @@ function GamePicker({ picked, onPick, onError }: { picked: Game | null; onPick: 
               {when(g.time) && <span className="small muted"> · {when(g.time)}</span>}
             </li>
           ))}
+          {!words && list.length > 0 && <li className="gamebox-note">The {count(list.length)} soonest games. Type to search them all.</li>}
         </ul>
       )}
     </div>
@@ -799,7 +552,7 @@ function ManualMode() {
           <div className="controls">
             <label className="field grow">
               Game
-              <GamePicker picked={current} onPick={pickGame} onError={fail} />
+              <GamePicker picked={current} soonest={loaded ?? []} onPick={pickGame} onError={fail} />
             </label>
           </div>
           <div className="field">
@@ -1005,9 +758,7 @@ export default function BestVenue() {
   const [how, setHow] = useState<How>(DEFAULT_HOW);
   return (
     <section>
-      <p className="tab-lead">
-        Pick a game, or run a strategy. Spread finds the same market on Kalshi and Polymarket US and shows where your order is cheaper, after fees.
-      </p>
+      <p className="tab-lead">Same bet, two prices. Spread shows you the cheaper one, after fees.</p>
       <div className="switch" role="tablist">
         {HOW.map((h) => (
           <button key={h.id} role="tab" aria-selected={how === h.id} className={how === h.id ? "current" : ""} onClick={() => setHow(h.id)}>
@@ -1018,9 +769,6 @@ export default function BestVenue() {
       {/* Each stays mounted, with its own trade: switching never shows another mode's result. */}
       <div hidden={how !== "manual"}>
         <ManualMode />
-      </div>
-      <div hidden={how !== "strategy"}>
-        <StrategyMode />
       </div>
       <div hidden={how !== "every"}>
         <EveryMarketMode />
