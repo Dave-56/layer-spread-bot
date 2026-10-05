@@ -1,11 +1,15 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { chat } from "@/lib/agent";
+import { refuse } from "@/lib/guard";
 
 // POST /api/chat {"messages":[...]} → newline-delimited JSON events (see ChatEvent).
 // The browser keeps the conversation and sends it back each turn, unchanged.
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  // Only this app's own page: the chat spends your LLM key and calls the engine.
+  const refused = refuse(request);
+  if (refused) return refused;
   const body = (await request.json().catch(() => null)) as { messages?: Anthropic.MessageParam[] } | null;
   if (!body?.messages?.length) return Response.json({ error: "send messages" }, { status: 400 });
   if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENROUTER_API_KEY) {

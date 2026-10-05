@@ -36,7 +36,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=8)
     ap.add_argument("--size", type=int, default=10)
     args = ap.parse_args()
-    c = TestClient(app)
+    # As the app's proxy calls it: this machine's own address, with the proxy header.
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"x-spread-proxy": "1"})
 
     t = time.monotonic()
     st = c.get("/status").json()
