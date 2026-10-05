@@ -146,9 +146,12 @@ export interface VenueRow {
   avg_price_label: string | null;
   limit_price: number | null;
   fees: number | null;
-  fillable: number | null; // whole contracts on offer at or under the price it would pay
+  // Whole contracts on offer at or under the price it would pay; when it can't fill the order, within its cap.
+  fillable: number | null;
+  cap_label: string | null; // "39¢": the most it would pay (the SDK's price collar or your limit)
   total_cost: number | null; // cost + fees for the whole order
   total_cost_per_contract: number | null;
+  cost_line: string | null; // "100 YES at 22¢ + $1.21 fee = $23.21": price paid + fee = total (null when it can't fill)
 }
 
 export interface CompareView {
@@ -165,6 +168,8 @@ export interface CompareView {
   saving: number | null; // dollars, for this size, vs the other venue
   saving_label: string | null; // "$0.97"
   verdict: string; // "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
+  try_size: number | null; // neither venue could fill it: a size that gets an answer ("Compare 40 instead")
+  collar_note: string | null; // why a thin market can't fill a big order, when the price collar stopped it
   as_of: string;
 }
 

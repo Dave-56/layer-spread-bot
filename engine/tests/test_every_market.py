@@ -44,6 +44,8 @@ def scan(engine, monkeypatch, listed, *, started=0, body=None):  # noqa: ANN001,
         return listed, started
 
     class _C:
+        rules = type("Rules", (), {"price_collar": 0.05})  # the SDK default
+
         def preview_best(self, m, side, size, max_price=None):  # noqa: ANN001, ANN202
             if m.kalshi.market_id == FAILS:
                 raise VenueError("rate_limited", "polymarket_us said too many requests.", venue="polymarket_us")

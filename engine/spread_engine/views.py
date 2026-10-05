@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -252,6 +253,22 @@ def _size(n: float) -> str:
     return f"{n:,g}"
 
 
+# uselayer 0.4.1 gives the size it found only in the skip's detail:
+# "Only 40 contracts on Kalshi at or below 0.39, the limit set by ...".
+_ONLY = re.compile(r"^Only ([0-9.eE+-]+) contracts")
+
+
+def available(v: Any) -> int | None:
+    """Whole contracts on offer within the venue's cap when it can't fill the whole order, else None."""
+    if v.skip != "not_enough_size":
+        return None
+    n = v.size_at_limit
+    if n is None:
+        hit = _ONLY.match(v.detail or "")
+        n = float(hit.group(1)) if hit else None
+    return None if n is None else math.floor(n + 1e-9)
+
+
 def skip_sentence(v: Any, limit: float | None = None) -> str | None:
     """Why a venue can't take the order (``uselayer.best.VenueCost.skip``), as one plain sentence."""
     if not v.skip:
@@ -275,10 +292,29 @@ def skip_sentence(v: Any, limit: float | None = None) -> str | None:
     if code == "below_min_price" and best and limit is not None:
         return f"{n}'s best bid is {best}, below your {cents_label(limit)} minimum."
     if code == "not_enough_size" and cap:
+        have = available(v)
+        if buy and have:
+            return f"{n} has only {_size(have)} {side} for sale at {cap} or less."
         if buy:
             return f"{n} doesn't have {_size(v.size)} {side} for sale at {cap} or less."
         return f"{n} isn't buying {_size(v.size)} {side} at {cap} or more."
     return SKIP.get(code, "").format(n=n, side=side, size=_size(v.size)) or f"{n} can't take this order."
+
+
+def cost_line(v: Any) -> str | None:
+    """What the order costs on one venue, price + fee = total: ``100 YES at 22¢ + $1.21 fee = $23.21``.
+
+    The price is the average paid for the whole order; "avg" when it's above the best price (the order
+    walks the book). A sell gets the fee taken off: ``100 YES at 30¢ − $0.60 fee = $29.40``. None when the
+    venue can't take the order.
+    """
+    if not v.ok or v.avg_price is None or v.fees is None or v.all_in is None:
+        return None
+    price = cents_label(v.avg_price)
+    if price != cents_label(v.best_price):
+        price += " avg"
+    sign = "−" if getattr(v, "action", "buy") == "sell" else "+"
+    return f"{_size(v.size)} {str(v.side).upper()} at {price} {sign} {money_label(v.fees)} fee = {money_label(v.all_in)}"
 
 
 def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[str, Any]:
@@ -300,9 +336,12 @@ def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[s
         "avg_price_label": cents_label(v.avg_price),
         "limit_price": v.limit_price,
         "fees": v.fees,
-        "fillable": None if v.size_at_limit is None else math.floor(v.size_at_limit + 1e-9),
+        # Can't fill: how many it does have within its cap. Can fill: how many at the price it would pay.
+        "fillable": available(v) if v.skip else (None if v.size_at_limit is None else math.floor(v.size_at_limit + 1e-9)),
+        "cap_label": cents_label(v.cap),
         "total_cost": v.all_in,
         "total_cost_per_contract": v.all_in_per_contract,
+        "cost_line": cost_line(v),  # the card's line: "100 YES at 22¢ + $1.21 fee = $23.21"
     }
 
 
@@ -328,14 +367,23 @@ def verdict_line(why: Any) -> str:
     return f"{name} is {by} cheaper for {size} contracts, fees included: {total} vs {money_label(other.all_in)}."
 
 
-def compare_view(m: Match, why: Any) -> dict[str, Any]:
+def collar_note(why: Any, collar: float | None) -> str | None:
+    """Why a thin market can't fill a big order, when the SDK's price collar is what stopped it."""
+    if collar is None or not any(v.skip == "not_enough_size" and v.capped_by == "price_collar" for v in why.venues):
+        return None
+    return f"Spread pays at most {cents_label(collar)} above a venue's cheapest offer, so a thin market can't fill a big order."
+
+
+def compare_view(m: Match, why: Any, collar: float | None = None) -> dict[str, Any]:
     """One order compared on both venues (``uselayer.best.BestVenue``), with labels for the app.
 
-    Every number is the SDK's; this only names and formats them.
+    Every number is the SDK's; this only names and formats them. ``collar``: the client's price collar.
     """
     # A venue that didn't answer leaves the comparison open: the other isn't "cheaper" or "the only one".
     unknown = [VENUE_NAMES.get(v.venue, v.venue) for v in why.venues if v.skip in UNKNOWN_SKIPS]
     chosen = None if unknown else why.venue
+    # Neither can fill it: the most both can (or the one that has any), so "Compare N instead" gets an answer.
+    room = [n for v in why.venues if (n := available(v))] if chosen is None and not unknown else []
     return {
         "action": why.action,
         "side": why.side,
@@ -349,6 +397,8 @@ def compare_view(m: Match, why: Any) -> dict[str, Any]:
         "saving": None if unknown else why.saving,
         "saving_label": None if unknown else money_label(why.saving),
         "verdict": verdict_line(why),
+        "try_size": min(room) if room else None,  # neither could fill: a size that gets an answer
+        "collar_note": collar_note(why, collar),
         "as_of": why.as_of.isoformat(),
     }
 
