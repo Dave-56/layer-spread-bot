@@ -25,6 +25,7 @@ import { fetchAccount, traded, type Account } from "./PaperAccount";
 
 const ADD_YOUR_OWN = "https://github.com/Dave-56/layer-spread-bot#add-your-own";
 const YOUR_OWN = "Your own";
+const upper = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ---- Used by the chat panel and the Arbitrage tab ------------------------------------------------
 
@@ -151,7 +152,7 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
                 ) : (
                   <>
                     <div className="venue-chance">—</div>
-                    <div className="small muted">{v.skip_reason ?? "Can't fill it."}</div>
+                    <div className="small muted">{upper(v.skip_reason ?? "can't fill it.")}</div>
                   </>
                 ))}
               {url && (
@@ -515,7 +516,7 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
     .filter((g) => g.items.length || g.name === YOUR_OWN);
   return (
     <>
-      {list && <p className="small muted hint">The examples are examples, not advice.</p>}
+      {list && <p className="small muted hint">Examples, not advice.</p>}
       {groups.map((g) => (
         <div key={g.name} className="card-group">
           <div className="label">{g.name}</div>
