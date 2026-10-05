@@ -652,46 +652,133 @@ export function gamesOf(found: MatchView[]): Game[] {
   return games;
 }
 
+const gameLabel = (g: Game) => `${g.title}${when(g.time) ? ` · ${when(g.time)}` : ""}`;
+const GAMES_LISTED = 30; // matches per list (a game is 2–3 of them); typing searches every open game
+
+/** Open games on both venues, soonest first, or the ones matching `words`. */
+const listGames = async (words: string) => {
+  const qs = new URLSearchParams({ limit: String(GAMES_LISTED) });
+  if (words.trim()) qs.set("q", words.trim());
+  return gamesOf((await getJson<{ matches: MatchView[] }>(`/engine/matches?${qs}`)).matches);
+};
+
+/**
+ * One box to find and pick a game: shows the pick, and typing in it searches every open game.
+ * The pick stays put while a search runs, so a search that doesn't list it never loses it.
+ */
+function GamePicker({ picked, onPick, onError }: { picked: Game | null; onPick: (g: Game) => void; onError: (e: unknown) => void }) {
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [games, setGames] = useState<Game[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [active, setActive] = useState(0);
+  const asked = useRef(0); // only the latest search's answer is shown
+  const box = useRef<HTMLInputElement>(null);
+
+  function search(words: string) {
+    const n = ++asked.current;
+    setSearching(true);
+    listGames(words)
+      .then((gs) => {
+        if (n !== asked.current) return;
+        setGames(gs);
+        setActive(0);
+      })
+      .catch((e) => n === asked.current && onError(e))
+      .finally(() => n === asked.current && setSearching(false));
+  }
+
+  // Wait for a pause in typing before asking the engine.
+  useEffect(() => {
+    if (!open) return;
+    const id = setTimeout(() => search(text), text ? 300 : 0);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, open]);
+
+  function choose(g: Game) {
+    onPick(g);
+    setText("");
+    box.current?.blur(); // closes the list; focusing the box again opens it
+  }
+
+  const list = games ?? [];
+  return (
+    <div className="gamebox">
+      <input
+        ref={box}
+        className="search"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="game-list"
+        value={open ? text : picked ? gameLabel(picked) : ""}
+        placeholder={picked ? gameLabel(picked) : "Type a team or league, e.g. yankees, nba"}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") setActive((i) => Math.min(i + 1, list.length - 1));
+          else if (e.key === "ArrowUp") setActive((i) => Math.max(i - 1, 0));
+          else if (e.key === "Enter" && list[active]) choose(list[active]);
+          else if (e.key === "Escape") e.currentTarget.blur();
+          else return;
+          e.preventDefault();
+        }}
+      />
+      {open && (
+        <ul className="gamebox-list" id="game-list" role="listbox">
+          {searching && !list.length && <li className="gamebox-note">Searching…</li>}
+          {!searching && games && !list.length && (
+            <li className="gamebox-note">{text.trim() ? "No game on both venues matches that." : "No game is open on both venues right now."}</li>
+          )}
+          {list.map((g, i) => (
+            <li
+              key={g.key}
+              role="option"
+              aria-selected={g.key === picked?.key}
+              className={`gamebox-option ${i === active ? "active" : ""}`}
+              // mousedown, not click: it lands before the box loses focus and closes the list
+              onMouseDown={(e) => {
+                e.preventDefault();
+                choose(g);
+              }}
+              onMouseEnter={() => setActive(i)}
+            >
+              {g.title}
+              {when(g.time) && <span className="small muted"> · {when(g.time)}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ManualMode() {
   const t = useTrade();
-  const [q, setQ] = useState("");
-  const [found, setFound] = useState<MatchView[] | null>(null);
-  const [searched, setSearched] = useState("");
-  const [game, setGame] = useState("");
+  const [loaded, setLoaded] = useState<Game[] | null>(null); // the first list, to pick the soonest game
+  const [current, setCurrent] = useState<Game | null>(null);
   const [mid, setMid] = useState("");
   const [mSide, setMSide] = useState<"yes" | "no">("yes");
   const [mSize, setMSize] = useState(100);
   const { fail } = t;
 
-  function showFound(ms: MatchView[], words: string) {
-    setFound(ms);
-    setSearched(words);
-    setGame(ms[0] ? (ms[0].event_key ?? ms[0].id) : "");
-    setMid(ms[0]?.id ?? "");
+  function pickGame(g: Game) {
+    setCurrent(g);
+    setMid(g.outcomes[0]?.id ?? "");
   }
 
-  async function find(words: string) {
-    t.setBusy("find");
-    try {
-      const qs = new URLSearchParams({ limit: "30" });
-      if (words.trim()) qs.set("q", words.trim());
-      showFound((await getJson<{ matches: MatchView[] }>(`/engine/matches?${qs}`)).matches, words.trim());
-    } catch (e) {
-      t.fail(e);
-    }
-    t.setBusy(null);
-  }
-
-  // Open games are listed as soon as this opens: nothing to guess before the one button.
+  // The soonest open game is picked as soon as this opens: nothing to guess before the one button.
   useEffect(() => {
-    getJson<{ matches: MatchView[] }>("/engine/matches?limit=30")
-      .then((r) => showFound(r.matches, ""))
+    listGames("")
+      .then((gs) => {
+        setLoaded(gs);
+        if (gs[0]) pickGame(gs[0]);
+      })
       .catch(fail);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const games = gamesOf(found ?? []);
-  const current = games.find((g) => g.key === game);
   const picked = current?.outcomes.find((m) => m.id === mid);
 
   function compare() {
@@ -701,48 +788,18 @@ function ManualMode() {
 
   return (
     <>
-      <div className="controls">
-        <label className="field grow">
-          Search a game
-          <input
-            className="search"
-            value={q}
-            placeholder="e.g. nba, yankees (blank: all open games)"
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && find(q)}
-          />
-        </label>
-        <button className="btn quiet" onClick={() => find(q)} disabled={t.busy !== null}>
-          {t.busy === "find" ? "Searching…" : "Search"}
-        </button>
-      </div>
-      {found === null && !t.error && (
+      {loaded === null && !t.error && (
         <div className="status">
           <span className="dot" /> Loading open games
         </div>
       )}
-      {found && !found.length && (
-        <p className="lead">{searched ? "No game on both venues matches that search." : "No game is open on both venues right now."}</p>
-      )}
+      {loaded && !loaded.length && <p className="lead">No game is open on both venues right now.</p>}
       {current && (
         <>
           <div className="controls">
             <label className="field grow">
               Game
-              <select
-                value={game}
-                onChange={(e) => {
-                  setGame(e.target.value);
-                  setMid(games.find((g) => g.key === e.target.value)?.outcomes[0]?.id ?? "");
-                }}
-              >
-                {games.map((g) => (
-                  <option key={g.key} value={g.key}>
-                    {g.title}
-                    {when(g.time) ? ` · ${when(g.time)}` : ""}
-                  </option>
-                ))}
-              </select>
+              <GamePicker picked={current} onPick={pickGame} onError={fail} />
             </label>
           </div>
           <div className="field">
