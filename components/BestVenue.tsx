@@ -166,7 +166,13 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
                   </>
                 ) : (
                   <>
-                    <div className="venue-chance">—</div>
+                    {/* It can't fill the order, but its cheapest offer is still worth showing. */}
+                    <div className="venue-chance">{(!v.unavailable && v.chance_label) || "—"}</div>
+                    {!v.unavailable && v.price_label && (
+                      <div className="small muted">
+                        Cheapest {side(c!.side)} at {v.price_label}
+                      </div>
+                    )}
                     <div className="small muted">{skipLine(v)}</div>
                   </>
                 ))}
@@ -306,8 +312,11 @@ function TryAgain({ onClick, busy }: { onClick: () => void; busy: boolean }) {
   );
 }
 
-/** The match, the two venues' markets, then the answer. Numbers folded below. Nothing is sent from here. */
-function TradeResult({ t }: { t: Trade }) {
+/**
+ * The match, the two venues' markets, then the answer. Numbers folded below. Nothing is sent from here.
+ * `onSize`: the chooser's contracts box, kept in step when "Compare N instead" changes the size.
+ */
+function TradeResult({ t, onSize }: { t: Trade; onSize?: (n: number) => void }) {
   const { trade, best, busy } = t;
   const ref = useShowWhenReady(best);
   if (!trade || !best) return null;
@@ -335,6 +344,20 @@ function TradeResult({ t }: { t: Trade }) {
           <h2 className={`headline ${c?.cheaper ? "" : "none"}`}>{h.title}</h2>
           {h.detail && <p className="lead">{h.detail}</p>}
           {h.retry && <TryAgain onClick={t.again} busy={busy !== null} />}
+          {c?.try_size != null && (
+            <div className="row again">
+              <button
+                className="btn"
+                disabled={busy !== null}
+                onClick={() => {
+                  onSize?.(c.try_size!);
+                  t.compare({ ...trade, size: c.try_size! }, trade.picked);
+                }}
+              >
+                {busy ? "Checking…" : `Compare ${count(c.try_size)} instead`}
+              </button>
+            </div>
+          )}
         </>
       )}
       {c && !h?.retry && (
@@ -757,7 +780,7 @@ function ManualMode() {
         </>
       )}
       <Working t={t} />
-      <TradeResult t={t} />
+      <TradeResult t={t} onSize={setMSize} />
     </>
   );
 }

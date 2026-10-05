@@ -270,6 +270,40 @@ def test_both_didnt_answer() -> None:
     assert v["venues"][1]["skip_reason"] == "Polymarket US's prices are too old to use right now. Try again in a few seconds."
 
 
+def thin(venue: str, have: str, best: float, cap: float) -> VenueCost:
+    """A venue whose book has fewer than 100 contracts within the price collar (uselayer 0.4.1's detail)."""
+    return cost(venue, skip="not_enough_size", best_price=best, cap=cap, capped_by="price_collar",
+                detail=f"Only {have} contracts on {venue} at or below {cap}, the limit set by the price collar (0.05 from the best price).")
+
+
+def test_a_thin_market_says_how_many_it_has_and_a_size_that_gets_an_answer() -> None:
+    v = views.compare_view(PAIR, why(thin("kalshi", "40", 0.34, 0.39), thin("polymarket_us", "15.5", 0.31, 0.36), None), 0.05)
+    k, u = v["venues"]
+    assert (k["fillable"], k["price_label"], k["cap_label"]) == (40, "34¢", "39¢")
+    assert u["fillable"] == 15 and u["skip_reason"] == "Polymarket US has only 15 YES for sale at 36¢ or less."
+    assert v["try_size"] == 15  # both venues can answer at 15
+    assert v["collar_note"] == "Spread pays at most 5¢ above a venue's cheapest offer, so a thin market can't fill a big order."
+
+
+def test_a_size_to_try_only_when_neither_venue_can_fill() -> None:
+    nobody = cost("polymarket_us", skip="no_offers", detail="Nobody is selling YES on Polymarket US right now.")
+    one = views.compare_view(PAIR, why(thin("kalshi", "40", 0.34, 0.39), nobody, None), 0.05)
+    assert one["try_size"] == 40  # the one venue with any
+    assert views.compare_view(PAIR, why(OK_K, thin("polymarket_us", "40", 0.31, 0.36), OK_K), 0.05)["try_size"] is None
+    busy = cost("polymarket_us", skip="unavailable", detail="polymarket_us didn't answer in time.")
+    assert views.compare_view(PAIR, why(thin("kalshi", "40", 0.34, 0.39), busy, None), 0.05)["try_size"] is None
+    none = views.compare_view(PAIR, why(thin("kalshi", "0.5", 0.34, 0.39), nobody, None), 0.05)
+    assert none["try_size"] is None and none["venues"][0]["fillable"] == 0
+
+
+def test_no_collar_note_when_your_own_limit_stopped_it() -> None:
+    mine = cost("kalshi", skip="not_enough_size", best_price=0.34, cap=0.35, capped_by="max_price",
+                detail="Only 40 contracts on kalshi at or below 0.35, the limit set by max_price 0.35.")
+    nobody = cost("polymarket_us", skip="no_offers", detail="x")
+    assert views.compare_view(PAIR, why(mine, nobody, None, 0.35), 0.05)["collar_note"] is None
+    assert views.compare_view(PAIR, why(thin("kalshi", "40", 0.34, 0.39), nobody, None))["collar_note"] is None  # collar unknown
+
+
 # ---- plain sentences ---------------------------------------------------------------------------------
 
 
@@ -278,7 +312,8 @@ def test_both_didnt_answer() -> None:
     [
         ({"skip": "above_max_price", "best_price": 0.98, "detail": "The best ask is 0.98, above max_price 0.97."}, 0.97, "Polymarket US's cheapest offer is 98¢, above your 97¢ limit."),
         ({"skip": "no_offers", "detail": "Nobody is selling YES on Polymarket US right now."}, None, "Nobody is selling YES on Polymarket US right now."),
-        ({"skip": "not_enough_size", "best_price": 0.6, "cap": 0.65, "detail": "Only 40 contracts on Polymarket US at or below 0.65, the limit set by ..."}, None, "Polymarket US doesn't have 100 YES for sale at 65¢ or less."),
+        ({"skip": "not_enough_size", "best_price": 0.6, "cap": 0.65, "detail": "Only 40 contracts on Polymarket US at or below 0.65, the limit set by ..."}, None, "Polymarket US has only 40 YES for sale at 65¢ or less."),
+        ({"skip": "not_enough_size", "best_price": 0.6, "cap": 0.65, "detail": "Only 0.4 contracts on Polymarket US at or below 0.65, the limit set by ..."}, None, "Polymarket US doesn't have 100 YES for sale at 65¢ or less."),
         ({"skip": "market_closed", "detail": "x isn't open for trading (closed)."}, None, "This market is closed on Polymarket US."),
         ({"skip": "not_found", "detail": "x"}, None, "Polymarket US doesn't know this market."),
         ({"skip": "unavailable", "detail": "polymarket_us said too many requests."}, None, "Polymarket US is busy right now. Try again in a few seconds."),

@@ -43,7 +43,7 @@ export function bestHeadline(c: CompareView, reasonCode?: string | null): Headli
   const skipped = c.venues.filter((v) => !v.ok).map(skipLine).join(" ");
   const chosen = c.venues.find((v) => v.cheaper);
   if (!chosen || !c.cheaper_name)
-    return { title: `No trade: neither venue can fill ${order} right now`, detail: skipped || c.verdict };
+    return { title: `No trade: neither venue can fill ${order} right now`, detail: [skipped || c.verdict, c.collar_note].filter(Boolean).join(" ") };
   const name = c.cheaper_name;
   const other = c.venues.find((v) => !v.cheaper && v.ok);
   if (!other)
