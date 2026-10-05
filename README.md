@@ -46,27 +46,47 @@ Keys in `.env`:
 | `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` | Live orders only. Paper mode reads Polymarket US's public books without a key. | polymarket.us/developer |
 | `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | The optional chat panel | console.anthropic.com, or openrouter.ai |
 
-## Add your strategy
+## Strategies
 
-Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the Best venue screen lists every file there.
+Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the Best venue screen lists every file there, grouped by category.
 
-1. Copy the template: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`
-2. Give it a `NAME` and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
-3. Reload the page and pick it. Edits to a strategy apply on the next run.
+It comes with examples named the way people trade. They're examples, not advice: none of them is a reason to expect a profit.
+
+| Category | Example | What it buys |
+|---|---|---|
+| Sports | Back the favorite | Next game first: 100 YES on the side priced 55¢–85¢, at most 85¢ |
+| Sports | Longshot under 20¢ | Next game first: 100 YES on an underdog under 20¢, at most 20¢ |
+| Sports | Game day: favorite in the last 6 hours | Games starting within 6 hours: 100 YES on the side priced 55¢–90¢, at most 90¢ |
+| Crypto | Crypto: nearly decided, last 3 days | Price-line markets closing within 3 days: 100 of the side priced 90¢–97¢, at most 97¢ |
+| News, politics & economics | Nearly decided, last 7 days | Markets closing within 7 days: 100 of the side priced 90¢–97¢, at most 97¢ |
+
+Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
+
+"Pick a trade yourself" on the same screen skips the strategy: search for any game or market, pick the outcome, YES or NO, contracts and a max price.
+
+### Add your own
+
+1. Copy the template: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`. Or press "add a .py file" on the Best venue screen: it saves your file in that folder.
+2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
+3. Reload the page and pick it. Edits to a strategy apply on the next run, without a restart.
 
 ```python
-from . import Signal, priced
+from . import SPORTS, NoTrade, Signal, priced
 
 NAME = "Momentum: buy YES under 40¢"
+CATEGORY = SPORTS
+DESCRIPTION = "Buys 50 YES when it's under 40¢ on both venues."
 
 def decide(matches, client):
-    for m, p in priced(matches, client):          # upcoming, rule-clean matches with both venues' prices
+    for m, p in priced(matches, client):          # upcoming, open and worded the same on both venues, with both prices
         if p.a.yes_ask < 0.40 and p.b.yes_ask < 0.40:
             return Signal(m, "yes", 50, max_price=0.40, why="YES is under 40¢ on both venues.")
-    return None                                    # no trade
+    return NoTrade("Nothing is under 40¢ on both venues right now.")
 ```
 
-`client` is the uselayer SDK with your keys, so a strategy can read anything: `client.prices(m)`, `client.book(m.kalshi)`. The four examples in the folder (first upcoming match, the favorite, an underdog under 30¢, where the venues disagree) are examples, not advice. "Pick a trade yourself" on the same screen skips the strategy: choose a market, YES or NO, contracts and a max price.
+`client` is the uselayer SDK with your keys, so a strategy can read anything: `client.prices(m)`, `client.book(m.kalshi)`. `LAYER_CATEGORIES = ("crypto",)` in the file asks Layer for those categories only. The helpers (`priced`, `cheapest`, `soonest`, `game_winner`, `starts_at`, `closes_at`) are in `strategies/__init__.py`.
+
+A strategy file is your own Python, run by the engine on your machine with your keys, like any script you run yourself. Adding one from the app saves it into `strategies/` and imports it once to check that it loads and has `decide()`; if not, the file is removed and you see why. The engine answers only this machine (`127.0.0.1`), so nobody else can add a file. Only add code you wrote or have read.
 
 ## Your keys stay on your machine
 
