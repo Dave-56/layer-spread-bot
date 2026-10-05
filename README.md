@@ -4,7 +4,7 @@ With uselayer, your trading bot keeps its own strategy and gains two abilities: 
 
 Spread runs on your machine, with your own keys, across **Kalshi** and **Polymarket US**. It has two screens:
 
-- **Best venue.** Your strategy (or you, by hand) decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it sends the order to the cheaper one.
+- **Best venue.** Your strategy (or you, by hand, or "Every market" for a whole list) decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it sends the order to the cheaper one.
 - **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see both venues side by side, then gross gap → fees → net → return per day, and you can paper-trade both sides. When the two venues word a bet differently, Spread still checks it and shows a warning with it.
 
 An optional chat panel answers the same questions in plain English, with your own LLM key.
@@ -61,6 +61,8 @@ It comes with examples named the way people trade. They're examples, not advice:
 | News, politics & economics | Nearly decided, last 7 days | Markets closing within 7 days: 100 of the side priced 90¢–97¢, at most 97¢ |
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
+
+"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes, since a Polymarket US book can take up to 30 seconds to read; a full check takes about two minutes. A market only one venue can price says why in one sentence, and a market worded differently on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
 
 "Pick a game yourself" on the same screen skips the strategy: search for any game or market, pick the outcome, YES or NO and contracts (a max price is under Settings).
 

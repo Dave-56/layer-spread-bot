@@ -11,6 +11,7 @@ The web app calls it; nothing else should. It answers only requests from this ma
     GET  /best/signal     Job 1: run a strategy, then compare its order on both venues
     POST /best/preview    Job 1: compare one order on both venues; sends nothing
     POST /best/buy        Job 1: send it to the cheaper venue (paper unless BOT_MODE=live)
+    POST /best/scan       Job 1 for every market: the next markets in a category, each compared, streamed
     POST /arb/scan        Job 2: the funnel, streamed as newline-delimited JSON
     POST /arb/trade       Job 2: buy both sides of one survivor (paper unless BOT_MODE=live)
     GET  /replay/files    replayable files in recordings/ (npm run record) and a folder you pick
@@ -33,10 +34,10 @@ from pydantic import BaseModel, Field
 from uselayer import Client, Match, VenueError
 from uselayer.guardrails import order_risk
 
-from . import config, replay, strategies
+from . import config, every_market, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .strategies import upcoming
-from .views import compare_view, error_view, match_id, match_view, over, rule_warning, trade_error
+from .views import compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -326,16 +327,20 @@ def best_signal(strategy: str = "sports_favorite", q: str | None = None, categor
     }
 
 
-def _preview(b: BestBody) -> dict[str, Any]:
+def _price(m: Match, side: str, size: int, max_price: float | None = None) -> dict[str, Any]:
+    """One order compared on both venues (``client.preview_best``); sends nothing."""
     try:
-        m = _find(b.match_id)
-        r = client().preview_best(m, b.side, b.size, max_price=b.max_price)
+        r = client().preview_best(m, side, size, max_price=max_price)
         if any(v.skip == "stale_book" for v in r.why.venues):
             # Polymarket US's cached book can come back just over 10 s old: read both books once more.
-            r = client().preview_best(m, b.side, b.size, max_price=b.max_price)
+            r = client().preview_best(m, side, size, max_price=max_price)
         return {"ok": True, **_best_view(m, r)}
     except VenueError as e:
-        return {"ok": False, "error": error_view(e)}
+        return {"ok": False, "error": error_view(e), "error_line": error_line(e)}
+
+
+def _preview(b: BestBody) -> dict[str, Any]:
+    return _price(_find(b.match_id), b.side, b.size, b.max_price)
 
 
 @app.post("/best/preview")
@@ -348,6 +353,26 @@ def best_buy(b: BestBody) -> dict[str, Any]:
     m = _find(b.match_id)
     r = client().buy_best(m, b.side, b.size, max_price=b.max_price)
     return {"mode": settings.mode, **_best_view(m, r)}
+
+
+class EveryMarketBody(BaseModel):
+    category: str = Field(default="sports", pattern="^(sports|news|crypto)$")
+    limit: int = Field(default=25, gt=0, le=50)
+    size: int = Field(default=100, gt=0, le=100_000)
+
+
+@app.post("/best/scan")
+def best_scan(b: EveryMarketBody) -> StreamingResponse:
+    """The next ``limit`` markets in a category (soonest first), each compared on both venues, streamed
+    as newline-delimited JSON while the books are read."""
+    ms, started = _list_in(None, every_market.CATEGORIES[b.category].layer, every_market.LISTED, upcoming_only=True)
+    ms = every_market.soonest_first(ms)[: b.limit]
+
+    def lines() -> Iterator[str]:
+        for event in every_market.scan(ms, _price, category=b.category, size=b.size, started=started):
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"cache-control": "no-store"})
 
 
 class ScanBody(BaseModel):

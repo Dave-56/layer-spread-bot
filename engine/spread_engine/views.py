@@ -94,73 +94,71 @@ def error_view(e: Exception) -> dict[str, Any]:
 
 # ---- Best venue: the comparison as the app shows it -------------------------------------------
 
-# The SDK's skip codes (uselayer.best), in words: one short clause each, never the SDK's own detail
-# text ("The best ask is 0.98, above max_price 0.97."). The app adds the venue's name.
+# The SDK's skip codes (uselayer.best), in words.
 SKIP = {
-    "switched_off": "orders here are switched off in this release",
+    "switched_off": "venue switched off in this release",
     "no_key": "no key for this venue",
     "not_allowed": "not allowed by your rules",
     "not_found": "market not found",
     "market_closed": "market closed",
-    "no_book": "no prices yet",
-    "stale_book": "its prices were too old to use; try again in a few seconds",
+    "no_book": "no book",
+    "stale_book": "book too old",
     "no_offers": "nobody selling",
     "above_max_price": "best price above your max",
     "below_min_price": "best price below your min",
     "not_enough_size": "not enough for sale within your max price",
-    "invalid_order": "breaks the market's price step or minimum",
+    "invalid_order": "breaks the market's tick or minimum",
     "not_held": "you don't hold it here",
-    "unavailable": "the venue didn't answer; try again",
+    "unavailable": "venue didn't answer",
 }
 
 
-def skip_reason(v: Any, limit: float | None = None) -> str | None:
-    """Why a venue was left out, as one plain clause, with the SDK's own numbers where they help."""
+# The same skip codes as one plain sentence, naming the venue. The SDK's own ``detail`` speaks in its
+# settings ("above max_price 0.97", "max_quote_age_s"); this never does.
+SKIP_LINE = {
+    "switched_off": "{name} is switched off in this release.",
+    "no_key": "There's no {name} key on this machine.",
+    "not_allowed": "Your rules don't allow trading on {name}.",
+    "not_found": "{name} doesn't list this market.",
+    "market_closed": "{name} isn't taking orders on this market right now.",
+    "no_book": "{name} has no prices for this market.",
+    "stale_book": "{name}'s prices didn't refresh in time to compare.",
+    "no_offers": "Nobody is selling {side} on {name} right now.",
+    "above_max_price": "{name}'s cheapest {side} costs more than your max price.",
+    "below_min_price": "{name}'s best bid is below your min price.",
+    "not_enough_size": "{name} doesn't have {size} {side} for sale near its best price.",
+    "invalid_order": "{name} won't take an order of this size or price.",
+    "not_held": "You don't hold this on {name}.",
+    "unavailable": "{name} didn't answer in time.",
+}
+
+# A comparison that failed outright (``VenueError``), by its code, as one plain sentence.
+ERROR_LINE = {
+    "rate_limited": "{name} is getting too many requests right now. Try again in a minute.",
+    "venue_unavailable": "{name} didn't answer in time.",
+    "venue_maintenance": "{name} is down for maintenance.",
+    "stale_quote": "{name}'s prices didn't refresh in time to compare.",
+    "not_found": "{name} doesn't list this market.",
+}
+
+
+def skip_line(v: Any) -> str | None:
+    """Why a venue can't take the order, as one plain sentence: "Nobody is selling YES on Kalshi right now."."""
     if not v.skip:
         return None
-    if v.skip == "above_max_price" and v.best_price is not None and limit is not None:
-        return f"best price {cents_label(v.best_price)}, above your max of {cents_label(limit)}"
-    if v.skip == "below_min_price" and v.best_price is not None and limit is not None:
-        return f"best price {cents_label(v.best_price)}, below your min of {cents_label(limit)}"
-    if v.skip == "not_enough_size" and v.cap is not None:
-        if v.action == "sell":
-            return f"not enough bids at {cents_label(v.cap)} or more"
-        return f"not enough for sale at {cents_label(v.cap)} or less"
-    return SKIP.get(v.skip, v.skip.replace("_", " "))
+    name = VENUE_NAMES.get(v.venue, v.venue)
+    return SKIP_LINE.get(v.skip, "{name} can't fill it right now.").format(
+        name=name, side=str(v.side).upper(), size=f"{v.size:,g}"
+    )
 
 
-def _venue(e: VenueError) -> str:
-    return VENUE_NAMES.get(e.venue or "", "A venue")
-
-
-def price_error(e: VenueError) -> str:
-    """Why a pair's prices couldn't be read, in one plain sentence (never the SDK's own text)."""
-    v = _venue(e)
-    return {
-        "no_key": f"{v} needs your key to show its prices.",
-        "auth_failed": f"{v} didn't accept your key.",
-        "rate_limited": f"{v} asked for fewer requests; scan again in a minute.",
-        "venue_unavailable": f"{v} didn't answer.",
-        "stale_quote": f"{v}'s prices were too old to use.",
-        "not_found": f"{v} doesn't list this market any more.",
-        "market_closed": f"{v} has closed this market.",
-    }.get(e.code, f"{v}'s prices couldn't be read right now.")
-
-
-def trade_error(e: VenueError) -> str:
-    """Why a paper or live trade sent nothing, in one plain sentence."""
-    if e.code == "stale_quote":
-        return f"{_venue(e)}'s prices were more than 10 seconds old, so nothing was bought. Try again."
-    if e.code == "blocked_by_rule":
-        rule = getattr(e, "rule", None)
-        if rule == "kill_switch":
-            return "The kill switch is on, so nothing was bought."
-        if rule == "budget":
-            return "This trade would take your account over its limit, so nothing was bought. Reset the paper account, or raise BOT_BUDGET in .env."
-        return "Your safety rules in .env blocked this trade, so nothing was bought."
-    if e.code == "market_closed":
-        return f"{_venue(e)} has closed this market, so nothing was bought."
-    return f"{price_error(e)} Nothing was bought."
+def error_line(e: Exception) -> str:
+    """A comparison that couldn't run, as one plain sentence."""
+    if isinstance(e, VenueError):
+        name = VENUE_NAMES.get(e.venue or "", "A venue") if e.venue else "A venue"
+        if e.code in ERROR_LINE:
+            return ERROR_LINE[e.code].format(name=name)
+    return "Couldn't read the prices for this one. Try again in a minute."
 
 
 def _num(x: float) -> str:
@@ -201,7 +199,10 @@ def pair_view(m: Match) -> dict[str, Any]:
     }
 
 
-def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[str, Any]:
+def _venue_row(v: Any, chosen: str | None) -> dict[str, Any]:
+    reason = SKIP.get(v.skip, v.skip) if v.skip else None
+    if reason and v.detail:
+        reason = f"{reason}. {v.detail}"
     return {
         "venue": v.venue,
         "venue_name": VENUE_NAMES.get(v.venue, v.venue),
@@ -209,7 +210,8 @@ def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[s
         "ok": v.ok,
         "cheaper": v.venue == chosen,
         "skip": v.skip,
-        "skip_reason": skip_reason(v, limit),
+        "skip_reason": reason,
+        "skip_line": skip_line(v),
         "price": v.best_price,
         "price_label": cents_label(v.best_price),
         "chance_label": chance_label(v.best_price),
@@ -254,7 +256,7 @@ def compare_view(m: Match, why: Any) -> dict[str, Any]:
         "size": why.size,
         "max_price": why.limit,
         "pair": pair_view(m),
-        "venues": [_venue_row(v, chosen, why.limit) for v in why.venues],
+        "venues": [_venue_row(v, chosen) for v in why.venues],
         "cheaper": chosen,
         "cheaper_name": VENUE_NAMES.get(chosen, chosen) if chosen else None,
         "saving": why.saving,
@@ -262,3 +264,20 @@ def compare_view(m: Match, why: Any) -> dict[str, Any]:
         "verdict": verdict_line(why),
         "as_of": why.as_of.isoformat(),
     }
+
+
+def trade_error(e: VenueError) -> str:
+    """Why a paper or live trade sent nothing, in one plain sentence (never the SDK's own text)."""
+    name = VENUE_NAMES.get(e.venue or "", "A venue")
+    if e.code == "stale_quote":
+        return f"{name}'s prices were more than 10 seconds old, so nothing was bought. Try again."
+    if e.code == "blocked_by_rule":
+        rule = getattr(e, "rule", None)
+        if rule == "kill_switch":
+            return "The kill switch is on, so nothing was bought."
+        if rule == "budget":
+            return "This trade would take your account over its limit, so nothing was bought. Reset the paper account, or raise BOT_BUDGET in .env."
+        return "Your safety rules in .env blocked this trade, so nothing was bought."
+    if e.code == "market_closed":
+        return f"{name} has closed this market, so nothing was bought."
+    return f"{error_line(e)} Nothing was bought."

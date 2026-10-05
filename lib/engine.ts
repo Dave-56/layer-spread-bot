@@ -108,6 +108,7 @@ export interface PreviewView {
 export interface BestResult {
   ok?: boolean;
   error?: EngineError;
+  error_line?: string; // why the comparison couldn't run, as one plain sentence
   sent?: boolean;
   order?: OrderView | null;
   why?: BestVenue;
@@ -133,7 +134,8 @@ export interface VenueRow {
   ok: boolean;
   cheaper: boolean;
   skip: string | null;
-  skip_reason: string | null; // one plain clause, e.g. "best price 98¢, above your max of 97¢"
+  skip_reason: string | null; // "best price above your max. The best ask is 0.98, above max_price 0.97."
+  skip_line: string | null; // the same as one plain sentence, for the screen: "Nobody is selling YES on Kalshi right now."
   price: number | null; // best ask for the side bought, in dollars
   price_label: string | null; // "54¢"
   chance_label: string | null; // "54%": the chance the market gives that side
@@ -160,6 +162,23 @@ export interface CompareView {
   verdict: string; // "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
   as_of: string;
 }
+
+// Best venue for every market (POST /best/scan, engine/spread_engine/every_market.py): one row per
+// market, compared on both venues as each finishes.
+export type EveryOutcome = "kalshi" | "polymarket_us" | "same" | "one_venue" | "neither" | "error";
+
+export interface EveryRow {
+  type: "row";
+  match: MatchView;
+  order: { match_id: string; side: "yes" | "no"; size: number; max_price: number | null };
+  best: BestResult; // the same result /best/preview gives, with its compare view
+  outcome: EveryOutcome;
+}
+
+export type EveryEvent =
+  | { type: "start"; total: number; category: string; size: number; side: string; empty: string | null }
+  | EveryRow
+  | { type: "done"; total: number; counts: Record<EveryOutcome, number> };
 
 // A file in engine/spread_engine/strategies/.
 export interface StrategyInfo {

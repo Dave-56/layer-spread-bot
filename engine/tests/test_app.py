@@ -324,20 +324,6 @@ def test_a_blocked_trade_is_one_plain_sentence(engine, monkeypatch: pytest.Monke
     assert r.status_code == 409 and r.json()["detail"].startswith("This trade would take your account over its limit, so nothing was bought.")
 
 
-def test_skip_reasons_are_plain_clauses_not_the_sdk_detail() -> None:
-    from uselayer import VenueCost
-
-    from spread_engine.views import skip_reason
-
-    def vc(**k):  # noqa: ANN003, ANN202
-        return VenueCost("kalshi", "K", "yes", "buy", 100, **k)
-
-    assert skip_reason(vc(skip="above_max_price", detail="The best ask is 0.98, above max_price 0.97.", best_price=0.98), 0.97) == "best price 98¢, above your max of 97¢"
-    assert skip_reason(vc(skip="not_enough_size", detail="Only 1.01 contracts on Kalshi at or below 0.57, the limit set by max_price 0.57.", cap=0.57), 0.57) == "not enough for sale at 57¢ or less"
-    assert skip_reason(vc(skip="stale_book", detail="The book is 12s old; max_quote_age_s is 10.")) == "its prices were too old to use; try again in a few seconds"
-    assert skip_reason(vc()) is None
-
-
 def test_preview_reads_again_once_when_a_book_was_too_old(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
     from dataclasses import replace
 

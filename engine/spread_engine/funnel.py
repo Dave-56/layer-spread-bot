@@ -27,7 +27,7 @@ from typing import Any, Protocol
 
 from uselayer import Match, Quote, VenueError
 
-from .views import VENUE_NAMES, match_view, price_error
+from .views import VENUE_NAMES, error_line, match_view
 
 GATES = (
     "unpriced",
@@ -110,7 +110,7 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
     try:
         q = client.quote(m, size=s.size, min_edge=s.min_edge)
     except VenueError as e:
-        return drop("unpriced", price_error(e))
+        return drop("unpriced", error_line(e))
     row["quote"] = quote_view(q)
 
     # Each reason is one plain sentence that adds to its group's name ("No gap"), never repeats it.
