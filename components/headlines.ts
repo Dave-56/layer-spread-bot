@@ -14,8 +14,7 @@ export interface Headline {
 
 // Best venue's ways in, in the order shown. The first is the default view.
 export const HOW = [
-  { id: "manual", label: "Pick a game yourself" },
-  { id: "strategy", label: "Run a strategy" },
+  { id: "manual", label: "Search a game" },
   { id: "every", label: "Every market" },
 ] as const;
 export type How = (typeof HOW)[number]["id"];

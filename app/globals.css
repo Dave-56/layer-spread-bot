@@ -107,6 +107,7 @@ h3 { font-weight: 600; font-size: 15.5px; margin: 28px 0 8px; }
 .gamebox-option.active { background: var(--paper-hover); }
 .gamebox-option[aria-selected="true"] { font-weight: 600; }
 .gamebox-note { padding: 7px 10px; font-size: 14px; color: var(--muted); }
+.gamebox-note.searching { display: flex; align-items: center; gap: 8px; }
 
 .btn {
   border: 1px solid var(--ink); background: var(--ink); color: var(--paper); border-radius: 6px; padding: 7px 14px;

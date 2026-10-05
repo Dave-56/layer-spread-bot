@@ -50,8 +50,7 @@ Keys in `.env`:
 
 Once http://127.0.0.1:3200 is open. Everything here uses real order books and fake money.
 
-- **Best venue → Pick a game yourself.** Choose a game, an outcome, YES or NO and how many contracts, then press **Compare venues**. You see each venue's price and which one is cheaper for that order, after fees. This tab never sends an order.
-- **Best venue → Run a strategy.** Pick an example strategy and press **Run**. It picks a trade, and you see which venue is cheaper for it.
+- **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and how many contracts, and press **Compare venues**. You see each venue's price and which one is cheaper for that order, after fees. This tab never sends an order.
 - **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each market is compared on both venues, biggest saving first.
 - **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
 - **Arbitrage → Replay.** Pick a game that's on now and press **Save prices**. When it's done, press **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
@@ -59,9 +58,9 @@ Once http://127.0.0.1:3200 is open. Everything here uses real order books and fa
 
 ## Strategies
 
-The Best venue screen opens on "Pick a game yourself": search for any game or market (blank lists every open game), pick the outcome, YES or NO and contracts (100 to start), and compare. "Run a strategy" and "Every market" are next to it.
+The Best venue screen opens on "Search a game". The Game box lists the soonest open games; each letter you type narrows that list at once, and after a short pause it searches every open game ("Searching all games…" shows until it answers). Pick the outcome, YES or NO and contracts (100 to start), and compare. "Every market" is next to it.
 
-Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the strategy dropdown on the Best venue screen lists every file there, grouped by category.
+Your strategy decides the trade; the bot finds the cheaper venue for it. Strategies run from code, not from a screen: each one is a file in `engine/spread_engine/strategies/`, listed by the engine's `GET /strategies` and run with `GET /best/signal`.
 
 It comes with examples named the way people trade. They're examples, not advice: none of them is a reason to expect a profit.
 
@@ -75,13 +74,13 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
-"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market whose rules differ slightly on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
+"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market whose rules differ slightly on the two venues is shown with that warning. Click a row to see that market's full comparison.
 
 ### Add your own
 
-1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`. Or choose "Add your own (.py)…" in the strategy dropdown, close the file picker, press "starter file" and save it under a new name.
+1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`.
 2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
-3. Choose "Add your own (.py)…" in the strategy dropdown and pick your file: it saves the file in that folder and selects it. (A file you copied into the folder shows up when you reload the page.) Edits to a strategy apply on the next run, without a restart.
+3. Run it against the engine: `curl "http://127.0.0.1:8765/best/signal?strategy=momentum"`. Edits to a strategy apply on the next run, without a restart.
 
 The starter file itself isn't in the list, since it never trades.
 
