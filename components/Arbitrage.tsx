@@ -344,6 +344,31 @@ function seconds(s: number): string {
   return s < 90 ? `${s.toFixed(0)} s` : `${(s / 60).toFixed(1)} min`;
 }
 
+/** Why no moment of a replay was a trade, in one plain sentence. */
+function replayNoTrade(res: ReplayResult): string {
+  const parts = ORDER.filter((v) => v !== "survivor" && res.counts[v])
+    .map((v) => ({ v, k: res.counts[v] }))
+    .sort((a, b) => b.k - a.k);
+  if (!parts.length) return "No trade: the file never had prices on both venues at once.";
+  if (res.counts.rules_differ === res.moments) return "No trade: Kalshi and Polymarket US word this bet differently.";
+  if (parts.length === 1) return `No trade at any of ${res.moments} moments: all ${VERDICT_PHRASE_ONE[parts[0].v]}.`;
+  return `No trade at any of ${res.moments} moments: ${parts.map((x) => `${x.k} ${VERDICT_PHRASE_ONE[x.v]}`).join(", ")}.`;
+}
+
+// Per moment, e.g. "12 had no gap".
+const VERDICT_PHRASE_ONE: Record<Verdict, string> = {
+  rules_differ: "the bet is worded differently on the two venues",
+  unpriced: "had prices we couldn't read",
+  no_offers: "had nobody selling on one venue",
+  no_gap: "had no gap",
+  fees: "had a gap smaller than the fees",
+  below_min_edge: "were below your minimum",
+  too_thin: "had too little for sale",
+  no_payout_date: "had no payout date",
+  per_day_low: "paid back too slowly",
+  survivor: "were still money after fees",
+};
+
 function Replay() {
   const [files, setFiles] = useState<ReplayFile[] | null>(null);
   const [folder, setFolder] = useState("");
@@ -392,21 +417,19 @@ function Replay() {
   return (
     <>
       <p className="small muted" style={{ marginTop: 0 }}>
-        Replays order-book history you have on this machine through the same checks as the live scan, in the
-        SDK&apos;s backtest mode. Record a matched pair with{" "}
-        <code>npm run record -- &lt;kalshi ticker&gt; --minutes 60</code> (files go to <code>recordings/</code>), or pick
-        a folder of files the SDK&apos;s <code>import_events</code> reads.
+        Replay prices you saved on this computer through the same checks. Save some with{" "}
+        <code>npm run record -- &lt;kalshi ticker&gt;</code>.
       </p>
       <div className="controls">
-        <label className="field">
+        <label className="field grow">
           Folder (optional)
-          <input className="wide" value={folder} placeholder="recordings/ is always listed" onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load(folder)} />
+          <input className="search" value={folder} placeholder="recordings/ is always included" onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load(folder)} />
         </label>
         <button className="btn quiet" onClick={() => load(folder)}>
           List files
         </button>
       </div>
-      {files && !files.length && <p className="small muted">No files yet. Record a pair with the command above.</p>}
+      {files && !files.length && <p className="small muted">No saved prices yet. Use the command above.</p>}
       {files && files.length > 0 && (
         <div className="controls">
           <label className="field">
@@ -422,7 +445,7 @@ function Replay() {
             </select>
           </label>
           <label className="field">
-            Contracts a leg
+            Contracts
             <input type="number" min={1} value={size} onChange={(e) => setSize(Math.max(1, +e.target.value || 1))} />
           </label>
           <button className="btn" onClick={run} disabled={busy || !file}>
@@ -436,12 +459,11 @@ function Replay() {
           <h3>Replay of {span(res.from, res.to)}</h3>
           <MatchLine m={res.match} />
           <p className="small muted">
-            {res.file}, replayed in the SDK&apos;s backtest mode: every moment either book changed, at most once a
-            second, through the same checks as the live scan.
+            {res.file}, checked at every price change (at most once a second).
             {res.size_unknown
-              ? " Top of book only, size unknown: prices are per contract, and nothing here says how many would fill."
+              ? " Top of book only, size unknown: prices are per contract."
               : res.top_of_book_only
-                ? " Top of book only: the file has one price level a side, so depth beyond it is unknown."
+                ? " Top of book only."
                 : ""}
           </p>
           <div className="funnel">
@@ -452,7 +474,7 @@ function Replay() {
             </div>
             {moments.map(({ v, n }) => (
               <div key={v} className={`step ${v === "survivor" ? "survivor" : ""}`}>
-                <span>{v === "survivor" ? "Still money after all of it" : VERDICT_LABEL[v]}</span>
+                <span>{VERDICT_LABEL[v]}</span>
                 <i style={{ width: `${Math.max(2, (n / Math.max(1, res.moments)) * 100)}%` }} />
                 <em>{n}</em>
               </div>
@@ -464,19 +486,19 @@ function Replay() {
               <Legs q={shown.quote} />
               <SurvivorMath q={shown.quote} perContract={res.size_unknown} />
               <p className="small muted" style={{ marginBottom: 0 }}>
-                A gap survived for {seconds(res.survivor_seconds)} in all, {seconds(res.longest_survivor_s)} at the longest.
+                The gap lasted {seconds(res.longest_survivor_s)} at its longest ({seconds(res.survivor_seconds)} in all).
               </p>
             </div>
           ) : (
-            <div className="box">
-              <b>No moment was money after fees, rules and depth.</b>
+            <p>
+              {replayNoTrade(res)}
               {shown?.quote && (
                 <span className="muted">
                   {" "}
-                  Closest: {cents(shown.quote.edge_at_best)} a contract after fees at {when(shown.at)} ({VERDICT_LABEL[shown.verdict].toLowerCase()}).
+                  Closest: {cents(shown.quote.edge_at_best)} a contract after fees, at {when(shown.at)}.
                 </span>
               )}
-            </div>
+            </p>
           )}
         </>
       )}

@@ -96,16 +96,21 @@ def decide(matches, client):
 
 Every number comes from the SDK's `client.quote()`: the gross spread, both venues' fees, the net, and the return per day until the later of the two markets pays out. Expect most scans to end with no survivor. When nothing is still money after fees, the right move is no trade.
 
-## Replay a gap you recorded
+## Replay prices you saved
 
-Record both venues' books for a matched pair with the SDK, then replay them through the same quote in backtest mode:
+The Replay switch on the Arbitrage screen runs saved order books through the same checks as the live scan, in the SDK's backtest mode, moment by moment.
+
+Save a matched pair's books while it trades (both venues, every change):
 
 ```bash
-cd engine
-uv run python -m uselayer record <kalshi-ticker> <polymarket-us-slug> --out pair.jsonl --minutes 60
+npm run record -- KXNBAGAME-26OCT05MEMATL-ATL --minutes 60
 ```
 
-Recording needs your Kalshi key and your Polymarket US key (its live stream is read with your key). The Replay switch on the Arbitrage screen is coming next.
+Use any Kalshi ticker from a scan; Layer finds its Polymarket US twin. Files go to `recordings/` (not committed), with the match saved next to them. Recording needs your Kalshi key and your Polymarket US key (its live stream is read with your key; nothing is traded).
+
+Any other file the SDK's `import_events` reads works too: type its folder into "Folder" and pick it. A file without a saved match is paired through Layer's matching. An optional `<name>.meta.json` beside it can give `settles_at` and `"sizes_unknown": true` (then prices are per contract, top of book only).
+
+The result: "Replay of <date>", how many moments were checked and why each was dropped, and the best moment's gross spread → fees → net → return per day, with how long the gap lasted.
 
 ## Tests
 
