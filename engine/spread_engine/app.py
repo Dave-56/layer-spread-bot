@@ -12,6 +12,8 @@ The web app calls it; nothing else should. It answers only requests from this ma
     POST /best/buy        Job 1: send it to the cheaper venue (paper unless BOT_MODE=live)
     POST /arb/scan        Job 2: the funnel, streamed as newline-delimited JSON
     POST /arb/trade       Job 2: buy both sides of one survivor (paper unless BOT_MODE=live)
+    GET  /replay/files    replayable files in recordings/ (npm run record) and a folder you pick
+    POST /replay/run      Job 2 replayed: one file through the same scan, in backtest mode
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from pydantic import BaseModel, Field
 from uselayer import Client, Match, VenueError
 from uselayer.guardrails import order_risk
 
-from . import config, strategies
+from . import config, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .strategies import upcoming
 from .views import error_view, match_id, match_view, over
@@ -268,6 +270,36 @@ class TradeBody(BaseModel):
     match_id: str
     size: int = Field(gt=0, le=100_000)
     min_edge: float = Field(default=0.01, ge=0, lt=1)
+
+
+@app.get("/replay/files")
+def replay_files(dir: str | None = None) -> dict[str, Any]:
+    return {"folders": [str(p) for p in replay.folders(dir)], "files": replay.list_files(dir)}
+
+
+class ReplayBody(BaseModel):
+    path: str
+    size: int = Field(default=100, gt=0, le=100_000)
+    min_edge: float = Field(default=0.0, ge=0, lt=1)
+    min_return_per_day_pct: float = Field(default=0.0, ge=0)
+
+
+def _lookup(ticker: str) -> Match | None:
+    try:
+        return replay.layer_match(client(), ticker)
+    except (VenueError, KeyError):
+        return None
+
+
+@app.post("/replay/run")
+def replay_run(b: ReplayBody) -> dict[str, Any]:
+    s = ScanSettings(size=b.size, min_edge=b.min_edge, min_return_per_day_pct=b.min_return_per_day_pct)
+    try:
+        return replay.replay(b.path, s, lookup=_lookup)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except LookupError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @app.post("/arb/trade")

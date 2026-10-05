@@ -1,12 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   errorText,
   ndjson,
   VERDICT_LABEL,
   VERDICT_PHRASE,
   type QuoteView,
+  type ReplayFile,
+  type ReplayResult,
   type ScanEvent,
   type ScanRow,
   type TradeResult,
@@ -68,25 +70,32 @@ export function FunnelBars({ f }: { f: FunnelState }) {
   );
 }
 
-export function SurvivorMath({ q }: { q: QuoteView }) {
+export function SurvivorMath({ q, perContract = false }: { q: QuoteView; perContract?: boolean }) {
+  // perContract: the size behind the prices is unknown, so show one contract's numbers only.
+  const amt = perContract ? cents : money;
   return (
     <div className="math">
       <div className="eq">
         <span>Gross spread</span>
-        <span>{money(q.gross_spread)}</span>
-        <span className="muted">{count(q.contracts)} contracts pay $1 each, minus what both legs cost</span>
+        <span>{amt(q.gross_spread)}</span>
+        <span className="muted">
+          {perContract ? "a contract: $1 at settlement, minus what both legs cost" : `${count(q.contracts)} contracts pay $1 each, minus what both legs cost`}
+        </span>
       </div>
       <div className="eq">
         <span>− Fees</span>
-        <span>{money(q.fees)}</span>
+        <span>{amt(q.fees)}</span>
         <span className="muted">
-          {q.a?.venue_name} {money(q.a?.fee)} + {q.b?.venue_name} {money(q.b?.fee)}
+          {q.a?.venue_name} {amt(q.a?.fee)} + {q.b?.venue_name} {amt(q.b?.fee)}
         </span>
       </div>
       <div className="eq total">
         <span>= Net</span>
-        <span className={q.net_profit > 0 ? "pos" : "neg"}>{money(q.net_profit)}</span>
-        <span className="muted">{pct(q.return_pct)} on {money(q.cost)}</span>
+        <span className={q.net_profit > 0 ? "pos" : "neg"}>{amt(q.net_profit)}</span>
+        <span className="muted">
+          {pct(q.return_pct)} on {amt(q.cost)}
+          {perContract ? " · top of book only, size unknown" : ""}
+        </span>
       </div>
       <div className="eq">
         <span>Return per day</span>
@@ -324,15 +333,176 @@ function Live({ mode }: { mode: "paper" | "live" }) {
   );
 }
 
+function span(from: string | null, to: string | null): string {
+  const a = when(from);
+  if (!a) return "—";
+  const b = to ? new Date(to).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) : null;
+  return b ? `${a} – ${b}` : a;
+}
+
+function seconds(s: number): string {
+  return s < 90 ? `${s.toFixed(0)} s` : `${(s / 60).toFixed(1)} min`;
+}
+
+/** Why no moment of a replay was a trade, in one plain sentence. */
+function replayNoTrade(res: ReplayResult): string {
+  const parts = ORDER.filter((v) => v !== "survivor" && res.counts[v])
+    .map((v) => ({ v, k: res.counts[v] }))
+    .sort((a, b) => b.k - a.k);
+  if (!parts.length) return "No trade: the file never had prices on both venues at once.";
+  if (res.counts.rules_differ === res.moments) return "No trade: Kalshi and Polymarket US word this bet differently.";
+  if (parts.length === 1) return `No trade at any of ${res.moments} moments: all ${VERDICT_PHRASE_ONE[parts[0].v]}.`;
+  return `No trade at any of ${res.moments} moments: ${parts.map((x) => `${x.k} ${VERDICT_PHRASE_ONE[x.v]}`).join(", ")}.`;
+}
+
+// Per moment, e.g. "12 had no gap".
+const VERDICT_PHRASE_ONE: Record<Verdict, string> = {
+  rules_differ: "the bet is worded differently on the two venues",
+  unpriced: "had prices we couldn't read",
+  no_offers: "had nobody selling on one venue",
+  no_gap: "had no gap",
+  fees: "had a gap smaller than the fees",
+  below_min_edge: "were below your minimum",
+  too_thin: "had too little for sale",
+  no_payout_date: "had no payout date",
+  per_day_low: "paid back too slowly",
+  survivor: "were still money after fees",
+};
+
 function Replay() {
+  const [files, setFiles] = useState<ReplayFile[] | null>(null);
+  const [folder, setFolder] = useState("");
+  const [file, setFile] = useState("");
+  const [size, setSize] = useState(100);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [res, setRes] = useState<ReplayResult | null>(null);
+
+  function load(dir: string) {
+    fetch(`/engine/replay/files${dir.trim() ? `?dir=${encodeURIComponent(dir.trim())}` : ""}`)
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(errorText(body, r.status));
+        const list = (body as { files: ReplayFile[] }).files;
+        setError(null);
+        setFiles(list);
+        setFile(list.find((f) => !f.error)?.path ?? "");
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }
+
+  useEffect(() => load(""), []);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    setRes(null);
+    try {
+      const r = await fetch("/engine/replay/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: file, size }),
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(errorText(body, r.status));
+      setRes(body as ReplayResult);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  }
+
+  const moments = res ? ORDER.filter((v) => res.counts[v]).map((v) => ({ v, n: res.counts[v] })) : [];
+  const shown = res?.best_survivor ?? res?.best ?? null;
   return (
-    <div className="box">
-      <b>Replay a gap you recorded.</b>
-      <p className="muted small" style={{ margin: "6px 0 0" }}>
-        Record both venues&apos; books with the SDK (<code>python -m uselayer record</code>), then replay them through
-        the same scan in backtest mode. Coming in the next change.
+    <>
+      <p className="small muted" style={{ marginTop: 0 }}>
+        Replay prices you saved on this computer through the same checks. Save some with{" "}
+        <code>npm run record -- &lt;kalshi ticker&gt;</code>.
       </p>
-    </div>
+      <div className="controls">
+        <label className="field grow">
+          Folder (optional)
+          <input className="search" value={folder} placeholder="recordings/ is always included" onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load(folder)} />
+        </label>
+        <button className="btn quiet" onClick={() => load(folder)}>
+          List files
+        </button>
+      </div>
+      {files && !files.length && <p className="small muted">No saved prices yet. Use the command above.</p>}
+      {files && files.length > 0 && (
+        <div className="controls">
+          <label className="field">
+            File
+            <select value={file} onChange={(e) => setFile(e.target.value)} style={{ minWidth: 340 }}>
+              {files.map((f) => (
+                <option key={f.path} value={f.path} disabled={!!f.error}>
+                  {f.error
+                    ? `${f.file} (can't read it)`
+                    : `${f.match ? f.match.outcome ?? f.match.title : f.file} · ${span(f.from ?? null, f.to ?? null)}${f.top_of_book_only ? " · top of book" : ""}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Contracts
+            <input type="number" min={1} value={size} onChange={(e) => setSize(Math.max(1, +e.target.value || 1))} />
+          </label>
+          <button className="btn" onClick={run} disabled={busy || !file}>
+            {busy ? "Replaying…" : "Replay"}
+          </button>
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
+      {res && (
+        <>
+          <h3>Replay of {span(res.from, res.to)}</h3>
+          <MatchLine m={res.match} />
+          <p className="small muted">
+            {res.file}, checked at every price change (at most once a second).
+            {res.size_unknown
+              ? " Top of book only, size unknown: prices are per contract."
+              : res.top_of_book_only
+                ? " Top of book only."
+                : ""}
+          </p>
+          <div className="funnel">
+            <div className="step">
+              <span>Moments checked</span>
+              <i style={{ width: "100%" }} />
+              <em>{res.moments}</em>
+            </div>
+            {moments.map(({ v, n }) => (
+              <div key={v} className={`step ${v === "survivor" ? "survivor" : ""}`}>
+                <span>{VERDICT_LABEL[v]}</span>
+                <i style={{ width: `${Math.max(2, (n / Math.max(1, res.moments)) * 100)}%` }} />
+                <em>{n}</em>
+              </div>
+            ))}
+          </div>
+          {res.best_survivor && shown?.quote ? (
+            <div className="box good">
+              <div className="label">Best moment · {when(shown.at)}</div>
+              <Legs q={shown.quote} />
+              <SurvivorMath q={shown.quote} perContract={res.size_unknown} />
+              <p className="small muted" style={{ marginBottom: 0 }}>
+                The gap lasted {seconds(res.longest_survivor_s)} at its longest ({seconds(res.survivor_seconds)} in all).
+              </p>
+            </div>
+          ) : (
+            <p>
+              {replayNoTrade(res)}
+              {shown?.quote && (
+                <span className="muted">
+                  {" "}
+                  Closest: {cents(shown.quote.edge_at_best)} a contract after fees, at {when(shown.at)}.
+                </span>
+              )}
+            </p>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
