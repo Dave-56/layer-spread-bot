@@ -301,6 +301,22 @@ def skip_sentence(v: Any, limit: float | None = None) -> str | None:
     return SKIP.get(code, "").format(n=n, side=side, size=_size(v.size)) or f"{n} can't take this order."
 
 
+def cost_line(v: Any) -> str | None:
+    """What the order costs on one venue, price + fee = total: ``100 YES at 22¢ + $1.21 fee = $23.21``.
+
+    The price is the average paid for the whole order; "avg" when it's above the best price (the order
+    walks the book). A sell gets the fee taken off: ``100 YES at 30¢ − $0.60 fee = $29.40``. None when the
+    venue can't take the order.
+    """
+    if not v.ok or v.avg_price is None or v.fees is None or v.all_in is None:
+        return None
+    price = cents_label(v.avg_price)
+    if price != cents_label(v.best_price):
+        price += " avg"
+    sign = "−" if getattr(v, "action", "buy") == "sell" else "+"
+    return f"{_size(v.size)} {str(v.side).upper()} at {price} {sign} {money_label(v.fees)} fee = {money_label(v.all_in)}"
+
+
 def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[str, Any]:
     return {
         "venue": v.venue,
@@ -325,6 +341,7 @@ def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[s
         "cap_label": cents_label(v.cap),
         "total_cost": v.all_in,
         "total_cost_per_contract": v.all_in_per_contract,
+        "cost_line": cost_line(v),  # the card's line: "100 YES at 22¢ + $1.21 fee = $23.21"
     }
 
 

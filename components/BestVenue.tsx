@@ -160,9 +160,7 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
                 (v.ok ? (
                   <>
                     <div className="venue-chance">{v.chance_label ?? "—"}</div>
-                    <div className="small muted">
-                      {side(c!.side)} at {v.price_label ?? "—"}
-                    </div>
+                    <div className="small muted">{v.cost_line ?? `${side(c!.side)} at ${v.price_label ?? "—"}`}</div>
                   </>
                 ) : (
                   <>

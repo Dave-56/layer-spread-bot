@@ -151,6 +151,7 @@ export interface VenueRow {
   cap_label: string | null; // "39¢": the most it would pay (the SDK's price collar or your limit)
   total_cost: number | null; // cost + fees for the whole order
   total_cost_per_contract: number | null;
+  cost_line: string | null; // "100 YES at 22¢ + $1.21 fee = $23.21": price paid + fee = total (null when it can't fill)
 }
 
 export interface CompareView {

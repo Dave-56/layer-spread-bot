@@ -24,6 +24,7 @@ const row = (v: Partial<VenueRow>): VenueRow => ({
   cap_label: "59¢",
   total_cost: 54.4,
   total_cost_per_contract: 0.544,
+  cost_line: null,
   ...v,
 });
 
