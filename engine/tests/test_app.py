@@ -124,7 +124,7 @@ def test_preview_found_by_ticker_alone_and_labelled(engine, monkeypatch: pytest.
     assert cmp["pair"] == {
         "kalshi": {"title": "A vs B", "outcome": "A", "question": None, "ticker": "KXMADEUPGAME-1-A", "url": "https://kalshi.example/a"},
         "polymarket_us": {"title": "A vs. B", "outcome": "A", "question": None, "slug": "madeup-a-b:long", "url": "https://polymarket.example/a-b"},
-        "note": "Layer matched these as the same bet (95% confidence).",
+        "note": "Layer is 95% sure these are the same bet.",
         "confidence": 0.95,
         "rule_warning": None,
     }
@@ -224,7 +224,7 @@ def test_a_strategy_that_picks_a_match_worded_differently_shows_the_warning(engi
     monkeypatch.setattr(engine.strategies, "module", lambda sid: pick)
     monkeypatch.setattr(engine, "_preview", lambda b: {"ok": True})
     sig = local(engine.app).get("/best/signal", params={"strategy": "any"}).json()["signal"]
-    assert sig["match"]["rule_warning"].startswith("Worded differently: different deadline")
+    assert sig["match"]["rule_warning"].startswith("Rules differ slightly on when the result is checked")
 
 
 def test_paper_trade_result_carries_the_warning(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
@@ -249,7 +249,7 @@ def test_paper_trade_result_carries_the_warning(engine, monkeypatch: pytest.Monk
     engine._matches[mt.kalshi.market_id] = mt
     monkeypatch.setattr(engine, "client", lambda: _C())
     body = local(engine.app).post("/arb/trade", json={"match_id": "KXMADEUP-1", "size": 5}).json()
-    assert body["mode"] == "paper" and body["rule_warning"].endswith("The two could settle differently.")
+    assert body["mode"] == "paper" and body["rule_warning"].endswith("in a rare case one could pay and the other not.")
 
 
 def test_replay_before_the_fee_schedule_is_one_plain_sentence(engine, tmp_path) -> None:  # noqa: ANN001

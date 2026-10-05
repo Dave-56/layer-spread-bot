@@ -76,10 +76,10 @@ def test_the_next_markets_compared_and_streamed(engine, monkeypatch: pytest.Monk
     assert ok["best"]["ok"] is True and ok["best"]["why"]["reason_code"] == "cheaper"
     assert ok["best"]["compare"]["verdict"] == "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
 
-    # Worded differently: priced and kept, with Layer's warning.
+    # Rules differ slightly: priced and kept, with Layer's warning.
     w = by["KXMADEUPGAME-2-A"]
     assert w["outcome"] == "kalshi"
-    assert w["match"]["rule_warning"] == "Worded differently: different data source. The two could settle differently."
+    assert w["match"]["rule_warning"] == "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not."
 
     # A comparison that failed is a row with one plain sentence; the scan goes on.
     f = by[FAILS]

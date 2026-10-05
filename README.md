@@ -75,7 +75,7 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
-"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market worded differently on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
+"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market whose rules differ slightly on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
 
 ### Add your own
 
@@ -136,7 +136,7 @@ A gap that survives is a card: both venues side by side (the side to buy, its pr
 
 **Paper-trade both sides** calls `client.trade()`. It reads both books again, and buys only if the gap is still there after fees (at least your minimum a contract); otherwise nothing is bought, and it says so. The scan accepts a book up to 30 seconds old, the age of Polymarket US's cached public book; the trade keeps the SDK's 10-second rule. If a book is older than that, it reads both books once more, then sends nothing and says why.
 
-**Worded differently.** Layer flags a match whose two markets differ on an edge case: a different data source, deadline, rounding, exception or definition. Spread doesn't drop it. It goes through the same checks as any other match and carries an amber note, e.g. "Worded differently: different data source. The two could settle differently." Then "both sides pay $1" may not hold, so a gap worded differently is listed below the ones worded the same.
+**Rules differ slightly.** Layer flags a match whose two markets differ on an edge case: a different data source, deadline, rounding, exception or definition. Spread doesn't drop it. It goes through the same checks as any other match and carries an amber note, e.g. "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not." Then "both sides pay $1" may not hold, so a gap whose rules differ is listed below the ones whose rules match.
 
 Expect most scans to end with no gap. When nothing is still money after fees, the right move is no trade.
 

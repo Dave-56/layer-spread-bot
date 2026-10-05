@@ -50,7 +50,7 @@ describe("rule differences", () => {
   });
 
   it("lists survivors worded the same first, then by profit after fees", () => {
-    const rows = [row("A", 5, "Worded differently: different data source. The two could settle differently."), row("B", 1, null), row("C", 3, null)];
+    const rows = [row("A", 5, "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not."), row("B", 1, null), row("C", 3, null)];
     expect(survivorOrder(rows).map((r) => r.match.id)).toEqual(["C", "B", "A"]);
     expect(rows.map((r) => r.match.id)).toEqual(["A", "B", "C"]); // a copy; the stream's order is kept
   });

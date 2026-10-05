@@ -178,7 +178,7 @@ def test_a_pair_worded_differently_is_replayed_with_its_warning(recording: str, 
     r.sidecar(tmp_path / recording).write_text(json.dumps(MATCH | {"caveats": ["source_differs"]}))
     out = r.replay(recording, ScanSettings(size=10))
     assert out["counts"]["survivor"] >= 1
-    assert out["match"]["rule_warning"].startswith("Worded differently: different data source.")
+    assert out["match"]["rule_warning"].startswith("Rules differ slightly on where the result comes from.")
 
 
 def test_no_pair_in_the_file_is_one_sentence(recording: str, tmp_path: Path) -> None:
