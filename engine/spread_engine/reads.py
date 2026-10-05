@@ -3,7 +3,7 @@
 What Polymarket US enforces (measured from this machine, 2026-10-04; it isn't published): its public
 gateway (``gateway.polymarket.us``) answers ``/v1/markets/<slug>/book`` with 429 after about 5 reads
 in 10 seconds from one IP address, when the request's User-Agent says it's Python. The SDK's does
-(``uselayer-python/0.4.0``), as do ``python-requests`` and ``python-httpx``. The block then lasts up
+(``uselayer-python/<version>``), as do ``python-requests`` and ``python-httpx``. The block then lasts up
 to ~10 s (``Retry-After``), and it's shared by every Python program on the same IP. The same reads
 with another User-Agent, and the gateway's other endpoints (markets, events), weren't limited at 5
 a second. Its published limit is 20-25 requests a second, which is what the SDK paces to (16 a

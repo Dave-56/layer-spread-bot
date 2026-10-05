@@ -147,7 +147,7 @@ To see the screen Polymarket US's "too many requests" leads to without waiting f
 
 ## Notes
 
-- The engine needs uselayer 0.4.0 or later (`engine/pyproject.toml`), from PyPI.
+- The engine needs uselayer 0.4.1 or later (`engine/pyproject.toml`), from PyPI.
 - Polymarket US answers "too many requests" after about 5 order-book reads in 10 seconds from one IP address by a Python program (measured; it isn't published), and every Python program on your network shares that. So the engine reads at most 4 Polymarket US books in any 10 seconds, reads a strategy's games one at a time, reuses a book for 3 seconds while comparing (never for an order), and after a "too many requests" waits as long as Polymarket US asks (`engine/spread_engine/reads.py`). If Polymarket US is still busy, the screen says so and offers "Try again"; it never calls Kalshi "the only venue" because Polymarket US didn't answer.
 - Spread never calls anything "risk-free": a gap can close before both orders fill, and venues can settle the same event differently.
 - MIT licensed.
