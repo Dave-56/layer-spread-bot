@@ -166,11 +166,11 @@ def test_assume_size_applies_level_changes_and_keeps_the_top_price_only() -> Non
 
 def test_before_the_fee_schedule_says_so_in_one_sentence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(r, "RECORDINGS", tmp_path)
-    name = thin_gap(tmp_path, day="2026-09-20")  # Polymarket US's first schedule in the SDK is Sep 25
+    name = thin_gap(tmp_path, day="2025-10-20")  # the SDK's Polymarket US fees start Nov 3, 2025 (Kalshi's Oct 1)
     with pytest.raises(r.CannotPrice) as e:
         r.replay(name, ScanSettings(size=100))
     assert str(e.value) == (
-        "Can't replay this file: it's from before Sep 25, 2026, and the SDK doesn't have Polymarket US's fees from before then yet."
+        "Can't replay this file: it's from before Nov 3, 2025, and the SDK doesn't have Polymarket US's fees from before then yet."
     )
 
 
@@ -181,10 +181,39 @@ def test_a_pair_worded_differently_is_replayed_with_its_warning(recording: str, 
     assert out["match"]["rule_warning"].startswith("Worded differently: different data source.")
 
 
-def test_no_pair_in_the_file_says_how_to_record(recording: str, tmp_path: Path) -> None:
+def test_no_pair_in_the_file_is_one_sentence(recording: str, tmp_path: Path) -> None:
     (tmp_path / "lonely.jsonl").write_text((tmp_path / recording).read_text().splitlines()[0] + "\n")
-    with pytest.raises(LookupError, match="npm run record"):
+    with pytest.raises(LookupError) as e:
         r.replay("lonely.jsonl", ScanSettings(), lookup=lambda t: None)
+    assert str(e.value) == "Can't replay this file: it doesn't hold a Kalshi market and its Polymarket US match together."
+
+
+def test_a_file_from_before_sep_25_now_replays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # uselayer 0.4.1 has Polymarket US's fees back to Nov 3, 2025: a July file is priced like any other.
+    monkeypatch.setattr(r, "RECORDINGS", tmp_path)
+    out = r.replay(thin_gap(tmp_path, day="2026-07-22"), ScanSettings(size=100))
+    assert out["counts"]["survivor"] >= 1
+
+
+def test_a_payout_time_already_past_is_left_out_not_a_dead_replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A season-long market whose venue gives the season's start as its event time: the estimated
+    # payout (start + 6 h) is before the recording. Each moment is still priced, with no return per day.
+    monkeypatch.setattr(r, "RECORDINGS", tmp_path)
+    name = thin_gap(tmp_path)
+    (tmp_path / name).with_suffix(".meta.json").write_text(json.dumps({"sizes_unknown": True, "settles_at": "2026-08-29T01:00:00Z"}))
+    out = r.replay(name, ScanSettings(size=100))
+    assert out["moments"] >= 1 and out["counts"]["survivor"] >= 1
+    assert out["best_survivor"]["quote"]["return_per_day_pct"] is None
+
+
+def test_a_file_never_priced_on_both_venues_is_one_sentence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(r, "RECORDINGS", tmp_path)
+    lines = [book("kalshi", "KXTEST-26OCT10-A", "2026-10-10T12:00:00Z", 0.4, 0.42), book("kalshi", "KXTEST-26OCT10-A", "2026-10-10T12:00:05Z", 0.4, 0.42)]
+    (tmp_path / "one-leg.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    r.sidecar(tmp_path / "one-leg.jsonl").write_text(json.dumps(MATCH))
+    with pytest.raises(r.CannotPrice) as e:
+        r.replay("one-leg.jsonl", ScanSettings())
+    assert str(e.value) == "Can't replay this file: it never has prices on both venues at the same moment."
 
 
 def test_only_files_inside_recordings(recording: str) -> None:

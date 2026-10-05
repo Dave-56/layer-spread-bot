@@ -43,6 +43,10 @@ class CannotPrice(Exception):
     """The file can't be priced at all, with one plain sentence why."""
 
 
+NO_PAIR = "Can't replay this file: it doesn't hold a Kalshi market and its Polymarket US match together."
+NEVER_TOGETHER = "Can't replay this file: it never has prices on both venues at the same moment."
+
+
 def sidecar(path: Path) -> Path:
     return path.with_suffix(".match.json")
 
@@ -235,17 +239,19 @@ def find_pair(path: Path, markets: dict[str, list[str]], lookup: Lookup | None) 
         found = lookup(ticker) if lookup else None
         if found is not None and found.polymarket_us.market_id in pm:
             return found
-    raise LookupError(
-        f"{path.name} has no Kalshi market and its matched Polymarket US twin together. "
-        "Record both with: npm run record -- <kalshi ticker>"
-    )
+    raise LookupError(NO_PAIR)
 
 
 class _At:
-    """Quotes against the replay's books, with the payout time a backtest can't read from the venues."""
+    """Quotes against the replay's books, with the payout time a backtest can't read from the venues.
 
-    def __init__(self, client: Client, settles_at: datetime | None) -> None:
-        self.c, self.settles_at = client, settles_at
+    A payout time that has already passed at this moment of the recording (an estimate from a
+    season's start date, say) isn't one: that moment is priced without a return per day.
+    """
+
+    def __init__(self, client: Client, settles_at: datetime | None, now: datetime) -> None:
+        self.c = client
+        self.settles_at = settles_at if settles_at is not None and settles_at > now else None
         self.error: VenueError | None = None
 
     def quote(self, pair: Any, *, size: int | None = None, min_edge: float = 0.0) -> Any:
@@ -261,7 +267,7 @@ def resolve(path: str) -> Path:
     if not p.is_absolute():
         p = RECORDINGS / p.name  # a bare name means a file in recordings/
     if p.suffix not in KINDS or not p.is_file():
-        raise FileNotFoundError(f"No replayable file at {path} ({', '.join(KINDS)}).")
+        raise FileNotFoundError(f"There's no saved-prices file at {path}.")
     return p
 
 
@@ -292,7 +298,7 @@ def replay(path: str, s: ScanSettings, *, lookup: Lookup | None = None) -> dict[
             return
         if st["last"] is not None and b.as_of - st["last"] < STEP:
             return
-        at = _At(c, settles_at)
+        at = _At(c, settles_at, b.as_of)
         row = judge(m, at, s)
         if row["verdict"] == "unpriced" and not st["priced"]:
             if at.error is not None and at.error.code == "no_venue_rules":
@@ -319,8 +325,8 @@ def replay(path: str, s: ScanSettings, *, lookup: Lookup | None = None) -> dict[
                 best["any"] = row
 
     Client(mode="backtest", books=evs, store=":memory:", on_alert=lambda e: None).replay(on_book)
-    if not st["priced"] and no_rules:
-        raise CannotPrice(no_rules_sentence(no_rules[0]))
+    if not st["priced"]:
+        raise CannotPrice(no_rules_sentence(no_rules[0]) if no_rules else NEVER_TOGETHER)
     return {
         "path": str(p),
         "file": p.name,

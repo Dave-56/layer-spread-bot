@@ -213,12 +213,15 @@ def _caveat_match():  # noqa: ANN202
 
 
 def test_a_strategy_that_picks_a_match_worded_differently_shows_the_warning(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from types import SimpleNamespace
+
     from spread_engine.strategies import Signal
 
     mt = _caveat_match()
-    monkeypatch.setattr(engine, "_list", lambda *a, **k: ([mt], 0))
+    monkeypatch.setattr(engine, "_list_in", lambda *a, **k: ([mt], 0))
     monkeypatch.setattr(engine, "client", lambda: None)
-    monkeypatch.setattr(engine.strategies, "get", lambda sid: lambda ms, c: Signal(ms[0], "yes", 10, why="made up"))
+    pick = SimpleNamespace(decide=lambda ms, c: Signal(ms[0], "yes", 10, why="made up"))
+    monkeypatch.setattr(engine.strategies, "module", lambda sid: pick)
     monkeypatch.setattr(engine, "_preview", lambda b: {"ok": True})
     sig = local(engine.app).get("/best/signal", params={"strategy": "any"}).json()["signal"]
     assert sig["match"]["rule_warning"].startswith("Worded differently: different deadline")
@@ -251,7 +254,7 @@ def test_paper_trade_result_carries_the_warning(engine, monkeypatch: pytest.Monk
 
 def test_replay_before_the_fee_schedule_is_one_plain_sentence(engine, tmp_path) -> None:  # noqa: ANN001
     lines = [
-        {"kind": "book", "venue": v, "market": mk, "bids": [{"price": 0.4, "size": 1}], "asks": [{"price": 0.42, "size": 1}], "as_of": f"2026-09-20T12:00:0{i}Z"}
+        {"kind": "book", "venue": v, "market": mk, "bids": [{"price": 0.4, "size": 1}], "asks": [{"price": 0.42, "size": 1}], "as_of": f"2025-10-20T12:00:0{i}Z"}
         for i, (v, mk) in enumerate([("kalshi", "KXMADEUP-1"), ("polymarket_us", "madeup-a"), ("kalshi", "KXMADEUP-1")])
     ]
     f = tmp_path / "early.jsonl"
@@ -259,4 +262,97 @@ def test_replay_before_the_fee_schedule_is_one_plain_sentence(engine, tmp_path) 
     f.with_suffix(".match.json").write_text(_caveat_match().model_dump_json())
     r = local(engine.app).post("/replay/run", json={"path": str(f)})
     assert r.status_code == 422
-    assert r.json()["detail"].startswith("Can't replay this file: it's from before Sep 25, 2026")
+    assert r.json()["detail"].startswith("Can't replay this file: it's from before Nov 3, 2025")
+
+
+class _Stale:
+    """A client whose trade() finds a book over 10 s old ``stale`` times, then trades."""
+
+    def __init__(self, stale: int, error: Exception | None = None) -> None:
+        self.calls, self.stale, self.error = 0, stale, error
+
+    def trade(self, *a, **k):  # noqa: ANN002, ANN003, ANN202
+        from uselayer import VenueError
+
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        if self.calls <= self.stale:
+            raise VenueError("stale_quote", "The polymarket_us book for madeup-a is older than max_quote_age_s.", venue="polymarket_us")
+        return _made_up_trade()
+
+
+def _made_up_trade():  # noqa: ANN202
+    from datetime import UTC, datetime
+
+    from uselayer import Quote
+
+    q = Quote(a=None, b=None, contracts=0, min_edge=0.01, edge_at_best=None, net_profit=0.0, net_profit_per_contract=0.0, fees=0.0, cost=0.0, return_pct=0.0, limited_by="no_asks", as_of=datetime(2026, 10, 4, tzinfo=UTC))
+
+    class _Trade:
+        quote = q
+
+        def to_dict(self) -> dict:
+            return {"status": "missed", "hedged": 0, "locked_in": 0, "unwind_loss": 0, "notes": []}
+
+    return _Trade()
+
+
+def test_paper_trade_reads_a_stale_book_once_more(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    mt = _caveat_match()
+    engine._matches[mt.kalshi.market_id] = mt
+    once = _Stale(stale=1)
+    monkeypatch.setattr(engine, "client", lambda: once)
+    assert local(engine.app).post("/arb/trade", json={"match_id": "KXMADEUP-1", "size": 5}).status_code == 200
+    assert once.calls == 2
+
+    twice = _Stale(stale=2)
+    monkeypatch.setattr(engine, "client", lambda: twice)
+    r = local(engine.app).post("/arb/trade", json={"match_id": "KXMADEUP-1", "size": 5})
+    assert r.status_code == 409 and twice.calls == 2
+    assert r.json()["detail"] == "Polymarket US's prices were more than 10 seconds old, so nothing was bought. Try again."
+
+
+def test_a_blocked_trade_is_one_plain_sentence(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from uselayer import VenueError
+
+    mt = _caveat_match()
+    engine._matches[mt.kalshi.market_id] = mt
+    blocked = VenueError("blocked_by_rule", "$140.00 would be at risk in total; the budget is $100.", rule="budget")
+    monkeypatch.setattr(engine, "client", lambda: _Stale(0, blocked))
+    r = local(engine.app).post("/arb/trade", json={"match_id": "KXMADEUP-1", "size": 5})
+    assert r.status_code == 409 and r.json()["detail"].startswith("This trade would take your account over its limit, so nothing was bought.")
+
+
+def test_skip_reasons_are_plain_clauses_not_the_sdk_detail() -> None:
+    from uselayer import VenueCost
+
+    from spread_engine.views import skip_reason
+
+    def vc(**k):  # noqa: ANN003, ANN202
+        return VenueCost("kalshi", "K", "yes", "buy", 100, **k)
+
+    assert skip_reason(vc(skip="above_max_price", detail="The best ask is 0.98, above max_price 0.97.", best_price=0.98), 0.97) == "best price 98¢, above your max of 97¢"
+    assert skip_reason(vc(skip="not_enough_size", detail="Only 1.01 contracts on Kalshi at or below 0.57, the limit set by max_price 0.57.", cap=0.57), 0.57) == "not enough for sale at 57¢ or less"
+    assert skip_reason(vc(skip="stale_book", detail="The book is 12s old; max_quote_age_s is 10.")) == "its prices were too old to use; try again in a few seconds"
+    assert skip_reason(vc()) is None
+
+
+def test_preview_reads_again_once_when_a_book_was_too_old(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from dataclasses import replace
+
+    from uselayer import BestOrder, Match
+
+    fresh = _best(Match.model_validate(MADE_UP))
+    k, u = fresh.why.venues
+    stale = BestOrder(None, replace(fresh.why, venues=(k, replace(u, skip="stale_book", detail="The book is 12s old; max_quote_age_s is 10."))), False)
+    answers = [stale, fresh]
+
+    class _C:
+        def preview_best(self, m, side, size, max_price=None):  # noqa: ANN001, ANN202
+            return answers.pop(0)
+
+    monkeypatch.setattr(engine.replay, "layer_match", lambda c, t: Match.model_validate(MADE_UP))
+    monkeypatch.setattr(engine, "client", lambda: _C())
+    body = local(engine.app).post("/best/preview", json={"match_id": "KXMADEUPGAME-1-A", "side": "yes", "size": 100}).json()
+    assert answers == [] and [v["skip"] for v in body["compare"]["venues"]] == [None, None]

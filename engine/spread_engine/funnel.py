@@ -21,12 +21,13 @@ or definition) goes through the same gates as any other. It is never dropped for
 from __future__ import annotations
 
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from uselayer import Match, Quote, VenueError
 
-from .views import VENUE_NAMES, error_view, match_view
+from .views import VENUE_NAMES, match_view, price_error
 
 GATES = (
     "unpriced",
@@ -52,7 +53,11 @@ class ScanSettings:
 
 
 def cents(x: float | None) -> str:
-    return "—" if x is None else f"{x * 100:.1f}¢"
+    """``1¢``, ``0.6¢``, ``−0.6¢``: at most one decimal, none when it's whole."""
+    if x is None:
+        return "—"
+    c = round(x * 100, 1)
+    return f"{'−' if c < 0 else ''}{abs(c):g}¢"
 
 
 def quote_view(q: Quote) -> dict[str, Any]:
@@ -105,27 +110,19 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
     try:
         q = client.quote(m, size=s.size, min_edge=s.min_edge)
     except VenueError as e:
-        return drop("unpriced", "Couldn't read the prices: " + error_view(e)["message"])
+        return drop("unpriced", price_error(e))
     row["quote"] = quote_view(q)
 
+    # Each reason is one plain sentence that adds to its group's name ("No gap"), never repeats it.
     if q.a is None or q.b is None or q.gross_at_best is None or q.edge_at_best is None:
-        return drop("no_offers", "Nobody is selling on one venue.")
+        return drop("no_offers", "Nobody is selling on one of the two venues.")
     gross, edge = q.gross_at_best, q.edge_at_best
     if gross <= 0:
-        return drop(
-            "no_gap",
-            f"No gap: both sides together cost {cents(1 - gross)}, before fees.",
-        )
+        return drop("no_gap", f"Both sides together cost {cents(1 - gross)}, before fees.")
     if edge <= 0:
-        return drop(
-            "fees",
-            f"The fees are bigger than the gap: {cents(gross)} a contract before fees, {cents(edge)} after.",
-        )
+        return drop("fees", f"A {cents(gross)} gap before fees, {cents(edge)} after.")
     if edge <= s.min_edge:
-        return drop(
-            "below_min_edge",
-            f"{cents(edge)} a contract after fees, under your minimum of {cents(s.min_edge)}.",
-        )
+        return drop("below_min_edge", f"{cents(edge)} a contract after fees; your minimum is {cents(s.min_edge)}.")
     if q.contracts < 1:
         return drop("too_thin", "Not enough for sale to buy even one contract at a profit.")
     if s.min_return_per_day_pct > 0:
@@ -134,8 +131,8 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
         if q.return_per_day_pct < s.min_return_per_day_pct:
             return drop(
                 "per_day_low",
-                f"Pays back too slowly: {q.return_per_day_pct:.3f}% a day, under your minimum of "
-                f"{s.min_return_per_day_pct:g}% ({q.return_pct:.2f}% over {q.days_held:g} days).",
+                f"{q.return_per_day_pct:.3f}% a day ({q.return_pct:.2f}% over {q.days_held:g} days); "
+                f"your minimum is {s.min_return_per_day_pct:g}%.",
             )
     row["verdict"] = "survivor"
     if q.contracts < s.size:
@@ -143,12 +140,18 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
     return row
 
 
-def scan(matches: list[Match], client: Quoter, s: ScanSettings) -> Iterator[dict[str, Any]]:
-    """Stream the funnel: a ``start`` event, one ``row`` per match, then ``done`` with the counts."""
+def scan(matches: list[Match], client: Quoter, s: ScanSettings, *, readers: int = 1) -> Iterator[dict[str, Any]]:
+    """Stream the funnel: a ``start`` event, one ``row`` per match, then ``done`` with the counts.
+
+    ``readers`` matches are priced at once (each is both venues' books), and rows come in match order.
+    """
     counts = {g: 0 for g in GATES} | {"survivor": 0}
     yield {"type": "start", "total": len(matches), "settings": s.__dict__}
-    for m in matches:
-        row = judge(m, client, s)
-        counts[row["verdict"]] += 1
-        yield {"type": "row", **row}
+    pool = ThreadPoolExecutor(max_workers=max(1, readers))
+    try:
+        for row in pool.map(lambda m: judge(m, client, s), matches):
+            counts[row["verdict"]] += 1
+            yield {"type": "row", **row}
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)  # the app stopped reading: stop pricing
     yield {"type": "done", "total": len(matches), "counts": counts}

@@ -94,23 +94,73 @@ def error_view(e: Exception) -> dict[str, Any]:
 
 # ---- Best venue: the comparison as the app shows it -------------------------------------------
 
-# The SDK's skip codes (uselayer.best), in words.
+# The SDK's skip codes (uselayer.best), in words: one short clause each, never the SDK's own detail
+# text ("The best ask is 0.98, above max_price 0.97."). The app adds the venue's name.
 SKIP = {
-    "switched_off": "venue switched off in this release",
+    "switched_off": "orders here are switched off in this release",
     "no_key": "no key for this venue",
     "not_allowed": "not allowed by your rules",
     "not_found": "market not found",
     "market_closed": "market closed",
-    "no_book": "no book",
-    "stale_book": "book too old",
+    "no_book": "no prices yet",
+    "stale_book": "its prices were too old to use; try again in a few seconds",
     "no_offers": "nobody selling",
     "above_max_price": "best price above your max",
     "below_min_price": "best price below your min",
     "not_enough_size": "not enough for sale within your max price",
-    "invalid_order": "breaks the market's tick or minimum",
+    "invalid_order": "breaks the market's price step or minimum",
     "not_held": "you don't hold it here",
-    "unavailable": "venue didn't answer",
+    "unavailable": "the venue didn't answer; try again",
 }
+
+
+def skip_reason(v: Any, limit: float | None = None) -> str | None:
+    """Why a venue was left out, as one plain clause, with the SDK's own numbers where they help."""
+    if not v.skip:
+        return None
+    if v.skip == "above_max_price" and v.best_price is not None and limit is not None:
+        return f"best price {cents_label(v.best_price)}, above your max of {cents_label(limit)}"
+    if v.skip == "below_min_price" and v.best_price is not None and limit is not None:
+        return f"best price {cents_label(v.best_price)}, below your min of {cents_label(limit)}"
+    if v.skip == "not_enough_size" and v.cap is not None:
+        if v.action == "sell":
+            return f"not enough bids at {cents_label(v.cap)} or more"
+        return f"not enough for sale at {cents_label(v.cap)} or less"
+    return SKIP.get(v.skip, v.skip.replace("_", " "))
+
+
+def _venue(e: VenueError) -> str:
+    return VENUE_NAMES.get(e.venue or "", "A venue")
+
+
+def price_error(e: VenueError) -> str:
+    """Why a pair's prices couldn't be read, in one plain sentence (never the SDK's own text)."""
+    v = _venue(e)
+    return {
+        "no_key": f"{v} needs your key to show its prices.",
+        "auth_failed": f"{v} didn't accept your key.",
+        "rate_limited": f"{v} asked for fewer requests; scan again in a minute.",
+        "venue_unavailable": f"{v} didn't answer.",
+        "stale_quote": f"{v}'s prices were too old to use.",
+        "not_found": f"{v} doesn't list this market any more.",
+        "market_closed": f"{v} has closed this market.",
+    }.get(e.code, f"{v}'s prices couldn't be read right now.")
+
+
+def trade_error(e: VenueError) -> str:
+    """Why a paper or live trade sent nothing, in one plain sentence."""
+    if e.code == "stale_quote":
+        return f"{_venue(e)}'s prices were more than 10 seconds old, so nothing was bought. Try again."
+    if e.code == "blocked_by_rule":
+        rule = getattr(e, "rule", None)
+        if rule == "kill_switch":
+            return "The kill switch is on, so nothing was bought."
+        if rule == "budget":
+            return "This trade would take your account over its limit, so nothing was bought. Reset the paper account, or raise BOT_BUDGET in .env."
+        return "Your safety rules in .env blocked this trade, so nothing was bought."
+    if e.code == "market_closed":
+        return f"{_venue(e)} has closed this market, so nothing was bought."
+    return f"{price_error(e)} Nothing was bought."
 
 
 def _num(x: float) -> str:
@@ -151,10 +201,7 @@ def pair_view(m: Match) -> dict[str, Any]:
     }
 
 
-def _venue_row(v: Any, chosen: str | None) -> dict[str, Any]:
-    reason = SKIP.get(v.skip, v.skip) if v.skip else None
-    if reason and v.detail:
-        reason = f"{reason}. {v.detail}"
+def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[str, Any]:
     return {
         "venue": v.venue,
         "venue_name": VENUE_NAMES.get(v.venue, v.venue),
@@ -162,7 +209,7 @@ def _venue_row(v: Any, chosen: str | None) -> dict[str, Any]:
         "ok": v.ok,
         "cheaper": v.venue == chosen,
         "skip": v.skip,
-        "skip_reason": reason,
+        "skip_reason": skip_reason(v, limit),
         "price": v.best_price,
         "price_label": cents_label(v.best_price),
         "chance_label": chance_label(v.best_price),
@@ -207,7 +254,7 @@ def compare_view(m: Match, why: Any) -> dict[str, Any]:
         "size": why.size,
         "max_price": why.limit,
         "pair": pair_view(m),
-        "venues": [_venue_row(v, chosen) for v in why.venues],
+        "venues": [_venue_row(v, chosen, why.limit) for v in why.venues],
         "cheaper": chosen,
         "cheaper_name": VENUE_NAMES.get(chosen, chosen) if chosen else None,
         "saving": why.saving,
