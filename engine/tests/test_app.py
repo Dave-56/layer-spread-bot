@@ -65,6 +65,104 @@ def test_reset_is_paper_only(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         module.settings = config.load()
 
 
-def test_unknown_match_is_a_clear_404(engine) -> None:  # noqa: ANN001
+def test_unknown_match_is_a_clear_404(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from uselayer import VenueError
+
+    def none(client, ticker):  # noqa: ANN001, ANN202
+        raise VenueError("not_found", "no match")
+
+    monkeypatch.setattr(engine.replay, "layer_match", none)
     r = TestClient(engine.app).post("/best/preview", json={"match_id": "KXNOPE", "side": "yes", "size": 10})
-    assert r.status_code == 404 and "Load matches first" in r.json()["detail"]
+    assert r.status_code == 404 and r.json()["detail"] == "Layer has no Polymarket US match for KXNOPE. Search for the market first."
+
+
+MADE_UP = {
+    "confidence": 0.95,
+    "caveats": [],
+    "kalshi": {"market_id": "KXMADEUPGAME-1-A", "group_id": "KXMADEUPGAME-1", "event": "A vs B", "outcome": "A", "url": "https://kalshi.example/a"},
+    "polymarket_us": {"market_id": "madeup-a-b:long", "group_id": "madeup-a-b", "event": "A vs. B", "outcome": "A", "url": "https://polymarket.example/a-b"},
+}
+
+
+def _best(match):  # noqa: ANN001, ANN202
+    """A made-up comparison, built from the SDK's own result types: Kalshi $0.97 cheaper for 100 YES."""
+    from datetime import UTC, datetime
+
+    from uselayer import BestOrder, BestVenue, VenueCost
+
+    at = datetime(2026, 10, 4, tzinfo=UTC)
+    k = VenueCost("kalshi", match.kalshi.market_id, "yes", "buy", 100, best_price=0.58, limit_price=0.58, avg_price=0.58, cost=58.0, fees=1.71, all_in=59.71, all_in_per_contract=0.5971, size_at_limit=954.5)
+    u = VenueCost("polymarket_us", match.polymarket_us.market_id, "yes", "buy", 100, best_price=0.585, limit_price=0.59, avg_price=0.59, cost=59.0, fees=1.68, all_in=60.68, all_in_per_contract=0.6068, size_at_limit=10675)
+    why = BestVenue("buy", "yes", 100, None, (k, u), k, "cheaper", "Kalshi is cheaper.", 0.97, at)
+    return BestOrder(None, why, False)
+
+
+def test_preview_found_by_ticker_alone_and_labelled(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from uselayer import Match
+
+    looked: list[str] = []
+
+    def lookup(client, ticker):  # noqa: ANN001, ANN202
+        looked.append(ticker)
+        return Match.model_validate(MADE_UP)
+
+    class _C:
+        def preview_best(self, m, side, size, max_price=None):  # noqa: ANN001, ANN202
+            return _best(m)
+
+    monkeypatch.setattr(engine.replay, "layer_match", lookup)
+    monkeypatch.setattr(engine, "client", lambda: _C())
+    body = TestClient(engine.app).post("/best/preview", json={"match_id": "KXMADEUPGAME-1-A", "side": "yes", "size": 100}).json()
+    assert looked == ["KXMADEUPGAME-1-A"] and body["ok"] is True
+    assert body["match"]["event_key"] == "KXMADEUPGAME-1"
+    cmp = body["compare"]
+    assert cmp["pair"] == {
+        "kalshi": {"title": "A vs B", "outcome": "A", "question": None, "ticker": "KXMADEUPGAME-1-A", "url": "https://kalshi.example/a"},
+        "polymarket_us": {"title": "A vs. B", "outcome": "A", "question": None, "slug": "madeup-a-b:long", "url": "https://polymarket.example/a-b"},
+        "note": "Layer matched these as the same bet (95% confidence).",
+        "confidence": 0.95,
+        "rule_warning": None,
+    }
+    k, u = cmp["venues"]
+    assert (k["price_label"], k["chance_label"], k["fillable"], k["total_cost"], k["cheaper"]) == ("58¢", "58%", 954, 59.71, True)
+    assert (u["price_label"], u["chance_label"], u["cheaper"]) == ("58.5¢", "58.5%", False)
+    assert (cmp["cheaper"], cmp["cheaper_name"], cmp["saving"], cmp["saving_label"]) == ("kalshi", "Kalshi", 0.97, "$0.97")
+    assert cmp["verdict"] == "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
+    assert body["why"]["venue"] == "kalshi"  # the SDK's own result is still there, unchanged
+
+
+def test_strategies_are_listed_by_category(engine) -> None:  # noqa: ANN001
+    body = TestClient(engine.app).get("/strategies").json()
+    assert body["categories"] == ["Sports", "Crypto", "News, politics & economics", "Your own"]
+    assert {s["category"] for s in body["strategies"]} <= set(body["categories"])
+
+
+def test_add_a_strategy_from_the_app(engine, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # noqa: ANN001
+    import sys
+
+    monkeypatch.setattr(engine.strategies, "FOLDER", tmp_path)
+    monkeypatch.setattr(engine.strategies, "__path__", [str(tmp_path), *engine.strategies.__path__])
+    c = TestClient(engine.app)
+    try:
+        bad = c.post("/strategies", json={"filename": "mine_app.py", "code": "def decide(:\n"})
+        assert bad.status_code == 422 and bad.json()["detail"].startswith("mine_app.py didn't load. Line 1:")
+        ok = c.post("/strategies", json={"filename": "mine_app.py", "code": "NAME = 'Mine'\ndef decide(m, c):\n    return None\n"}).json()
+        assert ok["added"]["id"] == "mine_app" and ok["added"]["category"] == "Your own"
+        assert [s["id"] for s in ok["strategies"]] == ["mine_app"]
+    finally:
+        sys.modules.pop("spread_engine.strategies.mine_app", None)
+
+
+def test_no_trade_says_the_strategy_sentence(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    asked: list = []
+
+    def listing(q, cats, limit, upcoming_only=False):  # noqa: ANN001, ANN202
+        asked.append(cats)
+        return [], 0
+
+    monkeypatch.setattr(engine, "_list_in", listing)
+    monkeypatch.setattr(engine, "client", lambda: None)
+    body = TestClient(engine.app).get("/best/signal", params={"strategy": "crypto_near_certain"}).json()
+    assert asked == [("crypto",)]  # the template's own Layer category
+    assert body["signal"] is None and body["best"] is None
+    assert body["no_trade"] == "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."

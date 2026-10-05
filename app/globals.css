@@ -168,6 +168,9 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
 }
 .card:hover { background: #fafafa; }
 .card.current { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.card:disabled { cursor: default; background: #fafafa; }
+.card-desc.bad { color: var(--bad); }
+.hint { margin: 0 0 10px; }
 .card-name { font-size: 14.5px; font-weight: 500; color: var(--ink); }
 .card-desc { font-size: 13px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
 .card.add { border-style: dashed; cursor: default; gap: 6px; }

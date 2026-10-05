@@ -6,13 +6,14 @@ import {
   VENUE_NAME,
   type BestResult,
   type BestVenue as Why,
+  type CompareView,
   type MatchView,
   type Signal,
   type StrategyInfo,
-  type VenueCost,
+  type StrategyList,
 } from "@/lib/engine";
-import { CAVEAT, cents, count, money, side, SKIP, when } from "./format";
-import { bestHeadline, chance, strategyNoTrade } from "./headlines";
+import { cents, count, money, side, SKIP, when } from "./format";
+import { alreadyExists, bestHeadline, matchNote, strategyNoTrade } from "./headlines";
 import { fetchAccount, traded, type Account } from "./PaperAccount";
 
 // Job 1: your strategy already knows the trade. The bot prices that exact order on both venues,
@@ -20,43 +21,28 @@ import { fetchAccount, traded, type Account } from "./PaperAccount";
 //
 // The flow: choose (a template, your own file, or a game by hand) → run → the match, the two
 // venues' markets side by side, and the answer: where to buy, and by how much it's cheaper.
+// Every number and label is the engine's (BestResult.compare); nothing is computed here.
 
-const ADD_YOUR_OWN = "https://github.com/Dave-56/layer-spread-bot#add-your-strategy";
-const VENUES = ["kalshi", "polymarket_us"] as const;
+const ADD_YOUR_OWN = "https://github.com/Dave-56/layer-spread-bot#add-your-own";
+const YOUR_OWN = "Your own";
 
-// ---- TODO(engine adapters) -------------------------------------------------------------------
-// The implementation engineer (branch spread-bot-rule-warnings-and-sizes) is adding strategy
-// CATEGORY, an upload route, and per-venue probability. Until the field names are final, these read
-// them if present and fall back to what the engine returns today. Swap the names here only.
+// ---- Used by the chat panel and the Arbitrage tab ------------------------------------------------
 
-/** A strategy's group: the engine's CATEGORY (Sports, Crypto, News…) once it sends one. */
-function categoryOf(s: StrategyInfo): string {
-  const c = (s as StrategyInfo & { category?: string | null }).category;
-  return c || (s.example ? "Templates" : "Yours");
+/** The SDK's comparison as one sentence, from its own numbers. */
+export function verdictLine(why: Why): string {
+  const chosen = why.venues.find((v) => v.venue === why.venue);
+  if (!chosen) return why.reason;
+  const other = why.venues.find((v) => v.venue !== why.venue && v.ok);
+  const name = VENUE_NAME[chosen.venue] ?? chosen.venue;
+  if (!other) return `Only ${name} can fill ${count(why.size)} contracts: ${money(chosen.all_in)}, fees included.`;
+  if (why.reason_code === "tie_more_size")
+    return `Same price on both (${money(chosen.all_in)} for ${count(why.size)}, fees included). ${name} has more for sale, so it goes there.`;
+  if (why.reason_code === "tie_first_listed")
+    return `Same price on both (${money(chosen.all_in)} for ${count(why.size)}, fees included), so it goes to ${name}.`;
+  const by = why.saving != null && why.saving < 0.005 ? "less than 1¢" : money(why.saving);
+  return `${name} is ${by} cheaper for ${count(why.size)} contracts, fees included: ${money(chosen.all_in)} vs ${money(other.all_in)}.`;
 }
 
-/** One venue's price as a chance: the engine's probability once it sends one, else its best price. */
-function probabilityOf(v: VenueCost): number | null {
-  const p = (v as VenueCost & { probability?: number | null }).probability;
-  return p ?? v.best_price;
-}
-
-/** Upload a strategy file. Assumed route: POST /strategies/upload {filename, source} → {id}. */
-async function uploadStrategy(file: File): Promise<{ id: string | null } | { missing: true }> {
-  const r = await fetch("/engine/strategies/upload", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ filename: file.name, source: await file.text() }),
-  });
-  if (r.status === 404 || r.status === 405) return { missing: true };
-  const body = await r.json().catch(() => null);
-  if (!r.ok) throw new Error(errorText(body, r.status));
-  const b = body as { id?: string; strategy?: { id?: string } } | null;
-  return { id: b?.id ?? b?.strategy?.id ?? null };
-}
-// ------------------------------------------------------------------------------------------------
-
-/** Both venues' numbers for one order. Also used by the chat panel. */
 export function CompareTable({ why }: { why: Why }) {
   return (
     <table className="t">
@@ -100,13 +86,6 @@ export function CompareTable({ why }: { why: Why }) {
   );
 }
 
-/** The SDK's comparison as one sentence (the chat panel). */
-export function verdictLine(why: Why): string {
-  const h = bestHeadline(why);
-  return `${h.title}. ${h.detail}`;
-}
-
-/** One line under a market: event, time, both venues' links. Used by the Arbitrage tab and the chat. */
 export function MatchLine({ m }: { m: MatchView }) {
   const t = when(m.event_time);
   return (
@@ -119,28 +98,28 @@ export function MatchLine({ m }: { m: MatchView }) {
       ) : (
         "Polymarket US"
       )}
-      {m.caveats.length > 0 && (
+      {m.rule_warning && (
         <span className="pill warn" style={{ marginLeft: 6 }}>
-          rules differ: {m.caveats.map((c) => CAVEAT[c] ?? c).join(", ")}
+          {m.rule_warning}
         </span>
       )}
     </div>
   );
+
 }
 
-/** A quiet warning: the two venues word this bet differently, so they could pay out differently. */
-function RuleNote({ caveats, text }: { caveats: string[]; text?: string | null }) {
-  if (!text && !caveats.length) return null;
-  return (
-    <div className="rule-note">
-      <b>Worded differently</b>: {text ?? `${caveats.map((c) => CAVEAT[c] ?? c).join(", ")}. The venues could pay out differently.`}
-    </div>
-  );
+// ---- Best venue ---------------------------------------------------------------------------------
+
+/** A quiet warning: the two venues word this bet differently, so they could settle differently. */
+function RuleNote({ text }: { text: string | null | undefined }) {
+  if (!text) return null;
+  return <div className="rule-note">{text}</div>;
 }
 
 /** The match, Polymarket-style: the outcome big, then each venue's market side by side with its chance. */
-function MarketCard({ m, why, sideName }: { m: MatchView; why?: Why; sideName: string }) {
+function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
   const t = when(m.event_time);
+  const warning = c?.pair.rule_warning ?? m.rule_warning;
   return (
     <div className="market">
       <div className="market-event">
@@ -149,27 +128,34 @@ function MarketCard({ m, why, sideName }: { m: MatchView; why?: Why; sideName: s
       </div>
       <div className="market-outcome">{m.outcome ?? m.title}</div>
       <div className="market-venues">
-        {VENUES.map((venue) => {
+        {(["kalshi", "polymarket_us"] as const).map((venue) => {
+          const p = c?.pair[venue];
           const mk = m[venue];
-          const v = why?.venues.find((x) => x.venue === venue);
-          const cheaper = why?.venue === venue;
+          const v = c?.venues.find((x) => x.venue === venue);
+          const url = p?.url ?? mk.url;
           return (
-            <div key={venue} className={`venue-cell ${cheaper ? "cheaper" : ""} ${v && !v.ok ? "out" : ""}`}>
+            <div key={venue} className={`venue-cell ${v?.cheaper ? "cheaper" : ""} ${v && !v.ok ? "out" : ""}`}>
               <div className="venue-name">
-                {VENUE_NAME[venue]}
-                {cheaper && <span className="pill good">Cheaper</span>}
+                {v?.venue_name ?? VENUE_NAME[venue]}
+                {v?.cheaper && <span className="pill good">Cheaper</span>}
               </div>
-              <div className="venue-q">{mk.question ?? mk.event ?? mk.market_id}</div>
-              {v && (
-                <>
-                  <div className="venue-chance">{v.ok ? chance(probabilityOf(v)) : "—"}</div>
-                  <div className="small muted">
-                    {v.ok ? `${sideName} at ${cents(v.best_price)}` : (SKIP[v.skip ?? ""] ?? v.skip ?? "can't fill it")}
-                  </div>
-                </>
-              )}
-              {mk.url && (
-                <a className="small venue-link" href={mk.url} target="_blank" rel="noreferrer">
+              <div className="venue-q">{p?.question ?? p?.title ?? mk.question ?? mk.event ?? mk.market_id}</div>
+              {v &&
+                (v.ok ? (
+                  <>
+                    <div className="venue-chance">{v.chance_label ?? "—"}</div>
+                    <div className="small muted">
+                      {side(c!.side)} at {v.price_label ?? "—"}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="venue-chance">—</div>
+                    <div className="small muted">{v.skip_reason ?? "Can't fill it."}</div>
+                  </>
+                ))}
+              {url && (
+                <a className="small venue-link" href={url} target="_blank" rel="noreferrer">
                   Open on {VENUE_NAME[venue]} ↗
                 </a>
               )}
@@ -177,9 +163,44 @@ function MarketCard({ m, why, sideName }: { m: MatchView; why?: Why; sideName: s
           );
         })}
       </div>
-      <div className="matched">Matched by Layer: the same bet on both venues.</div>
-      <RuleNote caveats={m.caveats} />
+      <div className="matched">{c ? matchNote(c.pair.note, c.pair.rule_warning) : "Matched by Layer: the same bet on both venues."}</div>
+      <RuleNote text={warning} />
     </div>
+  );
+}
+
+/** Each venue's numbers for the whole order, as the engine labels them. */
+function Numbers({ c }: { c: CompareView }) {
+  return (
+    <table className="t">
+      <thead>
+        <tr>
+          <th>Venue</th>
+          <th className="num">Avg price</th>
+          <th className="num">Fees</th>
+          <th className="num" title="Whole contracts for sale at or under the price it would pay">
+            For sale
+          </th>
+          <th className="num">Total cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {c.venues.map((v) => (
+          <tr key={v.venue} className={v.cheaper ? "chosen" : undefined}>
+            <td>
+              {v.venue_name}
+              {!v.ok && v.skip_reason && <div className="small muted">{v.skip_reason}</div>}
+            </td>
+            <td className="num">{v.avg_price_label ?? "—"}</td>
+            <td className="num">{money(v.fees)}</td>
+            <td className="num">{count(v.fillable)}</td>
+            <td className="num">
+              <b>{money(v.total_cost)}</b>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -189,6 +210,7 @@ interface Looked extends MatchView {
 
 interface SignalResult {
   signal: Signal | null;
+  no_trade?: string | null; // the strategy's own sentence
   matches: number;
   started?: number;
   looked?: Looked[];
@@ -281,7 +303,6 @@ function useTrade() {
 
 type Trade = ReturnType<typeof useTrade>;
 
-/** The match, the two venues' markets, then the answer and the button. Numbers folded below. */
 /** Bring a new result into view: on a laptop screen it lands below the chooser. */
 function useShowWhenReady(key: unknown) {
   const ref = useRef<HTMLDivElement>(null);
@@ -291,30 +312,30 @@ function useShowWhenReady(key: unknown) {
   return ref;
 }
 
+/** The match, the two venues' markets, then the answer and the button. Numbers folded below. */
 function TradeResult({ t, mode }: { t: Trade; mode: "paper" | "live" }) {
   const { trade, best, order, busy, acct, budgetBlocked } = t;
   const ref = useShowWhenReady(best);
   if (!trade || !best) return null;
-  const why = best.ok ? best.why : undefined;
-  const sideName = side(trade.side);
+  const c = best.ok ? best.compare : undefined;
   const p = best.preview;
-  const chosen = why?.venues.find((v) => v.venue === why.venue);
+  const chosen = c?.venues.find((v) => v.cheaper);
   // What the SDK's guardrails said about the chosen order, before anything is sent.
   const blocked =
     p && !p.allowed
-      ? budgetBlocked && acct && chosen?.all_in != null
-        ? `Your ${acct.mode === "paper" ? "paper " : ""}account already has ${money(acct.at_risk)} in open trades. This ${money(chosen.all_in)} order would take it over your ${money(acct.budget)} limit.`
+      ? budgetBlocked && acct && chosen?.total_cost != null
+        ? `Your ${acct.mode === "paper" ? "paper " : ""}account already has ${money(acct.at_risk)} in open trades. This ${money(chosen.total_cost)} order would take it over your ${money(acct.budget)} limit.`
         : [p.rules.decision.reason ?? (p.blocked_by ? `Blocked by ${p.blocked_by}.` : null), ...p.problems].filter(Boolean).join(" ")
       : null;
-  const h = why ? bestHeadline(why) : null;
+  const h = c ? bestHeadline(c, best.why?.reason_code) : null;
   return (
     <div className="result" ref={ref}>
       <div className="kicker">
-        {trade.picked}: buy {count(trade.size)} {sideName}
+        {trade.picked}: buy {count(trade.size)} {side(trade.side)}
         {trade.max_price != null ? `, at most ${cents(trade.max_price)} each` : ""}
         {trade.why ? <span className="muted"> · {trade.why}</span> : null}
       </div>
-      <MarketCard m={trade.match} why={why} sideName={sideName} />
+      <MarketCard m={trade.match} c={c} />
 
       {!best.ok && (
         <p className="error">
@@ -323,11 +344,11 @@ function TradeResult({ t, mode }: { t: Trade; mode: "paper" | "live" }) {
       )}
       {h && (
         <>
-          <h2 className={`headline ${why?.venue ? "" : "none"}`}>{h.title}</h2>
+          <h2 className={`headline ${c?.cheaper ? "" : "none"}`}>{h.title}</h2>
           <p className="lead">{h.detail}</p>
         </>
       )}
-      {why?.venue && blocked && (
+      {c?.cheaper && blocked && (
         <div className="box warn">
           <div className="label">Over your limit</div>
           {blocked}
@@ -340,14 +361,14 @@ function TradeResult({ t, mode }: { t: Trade; mode: "paper" | "live" }) {
           </div>
         </div>
       )}
-      {why?.venue && !order?.order && (
+      {c?.cheaper && !order?.order && (
         <div className="row">
           <button className="btn" onClick={t.buy} disabled={busy !== null || blocked !== null}>
             {busy === "buy"
               ? "Sending…"
               : mode === "live"
-                ? `Send LIVE order to ${VENUE_NAME[why.venue]}`
-                : `Paper-trade on ${VENUE_NAME[why.venue]}`}
+                ? `Send LIVE order to ${c.cheaper_name}`
+                : `Paper-trade on ${c.cheaper_name}`}
           </button>
           <span className="small muted">
             {mode === "live" ? "Real money." : "Fake money."} Pays at most {cents(chosen?.limit_price)} a contract.
@@ -360,10 +381,10 @@ function TradeResult({ t, mode }: { t: Trade; mode: "paper" | "live" }) {
           {count(order.order.size)} {side(order.order.side)} at {cents(order.order.avg_price)}, fees {money(order.order.fees)}.
         </div>
       )}
-      {why && (
+      {c && (
         <details className="fold">
           <summary>Price, fees and size on each venue</summary>
-          <CompareTable why={why} />
+          <Numbers c={c} />
         </details>
       )}
     </div>
@@ -383,32 +404,29 @@ function Working({ t, label = "Checking prices on both venues" }: { t: Trade; la
   );
 }
 
-/** Strategy names from the examples start with "Example:"; the group already says so. */
-const cardName = (s: StrategyInfo) => s.name.replace(/^Example:\s*/, "").replace(/^./, (c) => c.toUpperCase());
-
-function AddYourOwn({ onAdded }: { onAdded: (id: string | null) => void }) {
-  const [msg, setMsg] = useState<string | null>(null);
+/** Add your own .py: the engine saves it in strategies/, checks it loads, and lists it. */
+function AddYourOwn({ onAdded }: { onAdded: (b: StrategyList & { added: StrategyInfo }) => void }) {
+  const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
+  const [replace, setReplace] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
-  async function pickFile(file: File | undefined) {
+  async function send(file: File | undefined, again = false) {
     if (!file) return;
-    if (!file.name.endsWith(".py")) {
-      setMsg("Pick a .py file.");
-      return;
-    }
     setBusy(true);
     setMsg(null);
+    setReplace(null);
     try {
-      const r = await uploadStrategy(file);
-      if ("missing" in r)
-        setMsg("This engine can't take uploads yet. Copy the file into engine/spread_engine/strategies/ and reload.");
-      else {
-        setMsg(`Added ${file.name}.`);
-        onAdded(r.id);
-      }
+      const b = await getJson<StrategyList & { added: StrategyInfo }>(
+        "/engine/strategies",
+        post({ filename: file.name, code: await file.text(), replace: again }),
+      );
+      setMsg({ text: `Added ${file.name}: it's now "${b.added.name}" under ${b.added.category}.`, bad: false });
+      onAdded(b);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      const text = e instanceof Error ? e.message : String(e);
+      setMsg({ text, bad: true });
+      if (alreadyExists(text)) setReplace(file);
     }
     setBusy(false);
     if (input.current) input.current.value = "";
@@ -425,9 +443,14 @@ function AddYourOwn({ onAdded }: { onAdded: (id: string | null) => void }) {
         <button className="btn quiet" onClick={() => input.current?.click()} disabled={busy}>
           {busy ? "Uploading…" : "Upload a .py file"}
         </button>
-        <input ref={input} type="file" accept=".py,text/x-python" hidden onChange={(e) => pickFile(e.target.files?.[0])} />
-        {msg && <span className="small muted">{msg}</span>}
+        <input ref={input} type="file" accept=".py" hidden onChange={(e) => send(e.target.files?.[0])} />
+        {replace && (
+          <button className="btn quiet" onClick={() => send(replace, true)} disabled={busy}>
+            Replace it
+          </button>
+        )}
       </div>
+      {msg && <div className={`small ${msg.bad ? "error" : "muted"}`}>{msg.text}</div>}
     </div>
   );
 }
@@ -435,27 +458,28 @@ function AddYourOwn({ onAdded }: { onAdded: (id: string | null) => void }) {
 function StrategyMode({ mode }: { mode: "paper" | "live" }) {
   const t = useTrade();
   const [list, setList] = useState<StrategyInfo[] | null>(null);
-  const [pick, setPick] = useState("first_match");
+  const [cats, setCats] = useState<string[]>([]);
+  const [pick, setPick] = useState("sports_favorite");
   const [q, setQ] = useState("");
   const [noTrade, setNoTrade] = useState<string | null>(null);
   const [looked, setLooked] = useState<Looked[] | null>(null);
   const [allLooked, setAllLooked] = useState(false);
   const { fail } = t;
 
-  function load(select?: string | null) {
-    getJson<{ strategies: StrategyInfo[] }>("/engine/strategies")
+  useEffect(() => {
+    getJson<StrategyList>("/engine/strategies")
       .then((b) => {
         setList(b.strategies);
-        if (select) setPick(select);
+        setCats(b.categories);
       })
-      .catch(fail);
-  }
-  useEffect(() => {
-    getJson<{ strategies: StrategyInfo[] }>("/engine/strategies")
-      .then((b) => setList(b.strategies))
       .catch(fail);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function added(b: StrategyList & { added: StrategyInfo }) {
+    setList(b.strategies);
+    setPick(b.added.id);
+  }
 
   async function run() {
     t.start("run");
@@ -468,8 +492,7 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
       const r = await getJson<SignalResult>(`/engine/best/signal?${qs}`);
       if (r.signal) t.show(r.signal, "Your strategy picked", r.best);
       else {
-        const s = list?.find((x) => x.id === pick);
-        setNoTrade(strategyNoTrade(r, s && { example: s.example, category: (s as { category?: string | null }).category }, !!q.trim()));
+        setNoTrade(r.no_trade ?? `No trade: ${strategyNoTrade(r, !!q.trim())}`);
         setLooked(r.looked ?? []);
       }
     } catch (e) {
@@ -482,26 +505,20 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
     t.compare({ match_id: m.id, side: "yes", size: 100, max_price: null, why: "", match: m }, "You picked");
   }
 
-  // Templates grouped by category, in the engine's order; your own files last.
-  const groups: { name: string; items: StrategyInfo[] }[] = [];
-  const yours = "Yours";
-  for (const s of list ?? []) {
-    const name = categoryOf(s);
-    const g = groups.find((x) => x.name === name);
-    if (g) g.items.push(s);
-    else groups.push({ name, items: [s] });
-  }
   const noTradeRef = useShowWhenReady(noTrade);
   const chosen = list?.find((s) => s.id === pick);
+  const runnable = chosen && !chosen.error;
   const shown = looked ? (allLooked ? looked : looked.slice(0, 5)) : [];
+  // The engine's categories, in its order. "Your own" is always shown: it holds the upload card.
+  const groups = cats
+    .map((name) => ({ name, items: (list ?? []).filter((s) => s.category === name) }))
+    .filter((g) => g.items.length || g.name === YOUR_OWN);
   return (
     <>
+      {list && <p className="small muted hint">The examples are examples, not advice.</p>}
       {groups.map((g) => (
         <div key={g.name} className="card-group">
-          <div className="label">
-            {g.name}
-            {g.name === "Templates" ? <span className="muted"> · examples, not advice</span> : null}
-          </div>
+          <div className="label">{g.name}</div>
           <div className="cards">
             {g.items.map((s) => (
               <button
@@ -509,27 +526,20 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
                 aria-pressed={s.id === pick}
                 className={`card ${s.id === pick ? "current" : ""}`}
                 onClick={() => setPick(s.id)}
+                disabled={!!s.error}
               >
-                <span className="card-name">{cardName(s)}</span>
-                <span className="card-desc">{s.description}</span>
+                <span className="card-name">{s.name}</span>
+                <span className={`card-desc ${s.error ? "bad" : ""}`}>{s.error ? `Didn't load. ${s.error}` : s.description}</span>
               </button>
             ))}
-            {g.name === yours && <AddYourOwn onAdded={load} />}
+            {g.name === YOUR_OWN && <AddYourOwn onAdded={added} />}
           </div>
         </div>
       ))}
-      {!groups.some((g) => g.name === yours) && list && (
-        <div className="card-group">
-          <div className="label">Yours</div>
-          <div className="cards">
-            <AddYourOwn onAdded={load} />
-          </div>
-        </div>
-      )}
 
       <div className="controls run">
-        <button className="btn big" onClick={run} disabled={t.busy !== null || !chosen}>
-          {t.busy === "run" ? "Running…" : chosen ? `Run “${cardName(chosen)}”` : "Run strategy"}
+        <button className="btn big" onClick={run} disabled={t.busy !== null || !runnable}>
+          {t.busy === "run" ? "Running…" : chosen ? `Run “${chosen.name}”` : "Run strategy"}
         </button>
         <details className="settings">
           <summary>Settings</summary>
@@ -549,42 +559,44 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
       <Working t={t} label="Running the strategy, then checking prices on both venues" />
       {noTrade && (
         <div className="result" ref={noTradeRef}>
-          <h2 className="headline none">No trade</h2>
-          <p className="lead">{noTrade}</p>
+          <h2 className="headline none">{noTrade}</h2>
           {shown.length > 0 && (
-            <table className="t">
-              <tbody>
-                {shown.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      {m.outcome ?? m.title}
-                      {m.caveats.length > 0 && (
-                        <span className="pill warn" style={{ marginLeft: 8 }} title={m.caveats.map((c) => CAVEAT[c] ?? c).join(", ")}>
-                          worded differently
-                        </span>
-                      )}
-                      <div className="small muted">{m.title}</div>
-                    </td>
-                    <td className="num">
-                      <button className="btn quiet" onClick={() => compareFor(m)} disabled={t.busy !== null}>
-                        Compare
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              {!allLooked && looked && looked.length > 5 && (
-                <tfoot>
-                  <tr>
-                    <td colSpan={2}>
-                      <button className="link" onClick={() => setAllLooked(true)}>
-                        Show all {looked.length}
-                      </button>
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
+            <>
+              <p className="lead">It looked at these. Compare one yourself:</p>
+              <table className="t">
+                <tbody>
+                  {shown.map((m) => (
+                    <tr key={m.id}>
+                      <td>
+                        {m.outcome ?? m.title}
+                        {m.rule_warning && (
+                          <span className="pill warn" style={{ marginLeft: 8 }} title={m.rule_warning}>
+                            worded differently
+                          </span>
+                        )}
+                        <div className="small muted">{m.title}</div>
+                      </td>
+                      <td className="num">
+                        <button className="btn quiet" onClick={() => compareFor(m)} disabled={t.busy !== null}>
+                          Compare
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {!allLooked && looked && looked.length > 5 && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={2}>
+                        <button className="link" onClick={() => setAllLooked(true)}>
+                          Show all {looked.length}
+                        </button>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </>
           )}
         </div>
       )}
@@ -593,13 +605,21 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
   );
 }
 
-/** Matches grouped into games: one Layer match is one outcome of one event. */
-function gamesOf(found: MatchView[]): { title: string; time: string | null; outcomes: MatchView[] }[] {
-  const games: { title: string; time: string | null; outcomes: MatchView[] }[] = [];
+interface Game {
+  key: string;
+  title: string;
+  time: string | null;
+  outcomes: MatchView[];
+}
+
+/** Matches grouped into games by the engine's event_key: one match is one outcome of one game. */
+function gamesOf(found: MatchView[]): Game[] {
+  const games: Game[] = [];
   for (const m of found) {
-    const g = games.find((x) => x.title === m.title);
+    const key = m.event_key ?? m.id;
+    const g = games.find((x) => x.key === key);
     if (g) g.outcomes.push(m);
-    else games.push({ title: m.title, time: m.event_time, outcomes: [m] });
+    else games.push({ key, title: m.title, time: m.event_time, outcomes: [m] });
   }
   return games;
 }
@@ -619,14 +639,14 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
   function showFound(ms: MatchView[], words: string) {
     setFound(ms);
     setSearched(words);
-    setGame(ms[0]?.title ?? "");
+    setGame(ms[0] ? (ms[0].event_key ?? ms[0].id) : "");
     setMid(ms[0]?.id ?? "");
   }
 
   async function find(words: string) {
     t.setBusy("find");
     try {
-      const qs = new URLSearchParams({ limit: "50" });
+      const qs = new URLSearchParams({ limit: "30" });
       if (words.trim()) qs.set("q", words.trim());
       showFound((await getJson<{ matches: MatchView[] }>(`/engine/matches?${qs}`)).matches, words.trim());
     } catch (e) {
@@ -637,20 +657,20 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
 
   // Open games are listed as soon as this opens: nothing to guess before the one button.
   useEffect(() => {
-    getJson<{ matches: MatchView[] }>("/engine/matches?limit=50")
+    getJson<{ matches: MatchView[] }>("/engine/matches?limit=30")
       .then((r) => showFound(r.matches, ""))
       .catch(fail);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const games = gamesOf(found ?? []);
-  const current = games.find((g) => g.title === game);
+  const current = games.find((g) => g.key === game);
+  const picked = current?.outcomes.find((m) => m.id === mid);
 
   function compare() {
-    const m = found?.find((x) => x.id === mid);
-    if (!m) return;
+    if (!picked) return;
     const max = mMax.trim() ? Number(mMax) / 100 : null;
-    t.compare({ match_id: m.id, side: mSide, size: mSize, max_price: max, why: "", match: m }, "Your trade");
+    t.compare({ match_id: picked.id, side: mSide, size: mSize, max_price: max, why: "", match: picked }, "Your trade");
   }
 
   return (
@@ -687,11 +707,11 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
                 value={game}
                 onChange={(e) => {
                   setGame(e.target.value);
-                  setMid(games.find((g) => g.title === e.target.value)?.outcomes[0]?.id ?? "");
+                  setMid(games.find((g) => g.key === e.target.value)?.outcomes[0]?.id ?? "");
                 }}
               >
                 {games.map((g) => (
-                  <option key={g.title} value={g.title}>
+                  <option key={g.key} value={g.key}>
                     {g.title}
                     {when(g.time) ? ` · ${when(g.time)}` : ""}
                   </option>
@@ -701,27 +721,22 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
           </div>
           <div className="field">
             Outcome
-            <div className="outcomes" role="radiogroup" aria-label="Outcome">
+            <div className="outcomes">
               {current.outcomes.map((m) => (
-                <button
-                  key={m.id}
-                  role="radio"
-                  aria-checked={m.id === mid}
-                  className={`outcome ${m.id === mid ? "current" : ""}`}
-                  onClick={() => setMid(m.id)}
-                >
+                <button key={m.id} aria-pressed={m.id === mid} className={`outcome ${m.id === mid ? "current" : ""}`} onClick={() => setMid(m.id)}>
                   {m.outcome ?? m.title}
-                  {m.caveats.length ? <span className="warn-dot" title="Worded differently on the two venues" /> : null}
+                  {m.rule_warning ? <span className="warn-dot" title={m.rule_warning} /> : null}
                 </button>
               ))}
             </div>
           </div>
+          <RuleNote text={picked?.rule_warning} />
           <div className="controls" style={{ marginTop: 14 }}>
             <div className="field">
               Side
-              <div className="switch tight" role="radiogroup" aria-label="Side">
+              <div className="switch tight">
                 {(["yes", "no"] as const).map((s) => (
-                  <button key={s} role="radio" aria-checked={mSide === s} className={mSide === s ? "current" : ""} onClick={() => setMSide(s)}>
+                  <button key={s} aria-pressed={mSide === s} className={mSide === s ? "current" : ""} onClick={() => setMSide(s)}>
                     {side(s)}
                   </button>
                 ))}
@@ -731,7 +746,7 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
               Contracts
               <input type="number" min={1} value={mSize} onChange={(e) => setMSize(Math.max(1, +e.target.value || 1))} />
             </label>
-            <button className="btn big" onClick={compare} disabled={t.busy !== null || !mid}>
+            <button className="btn big" onClick={compare} disabled={t.busy !== null || !picked}>
               {t.busy === "run" ? "Comparing…" : "Compare venues"}
             </button>
             <details className="settings">

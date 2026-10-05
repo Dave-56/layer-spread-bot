@@ -43,10 +43,30 @@ def main() -> int:
     show("status", t, st)
     assert st["mode"] == "paper", "smoke runs in paper mode only"
 
+    lst = c.get("/strategies").json()
+    print("\n== strategies:", ", ".join(f"{s['category']} / {s['name']}" + (f" (error: {s['error']})" if s["error"] else "") for s in lst["strategies"]))
+
     t = time.monotonic()
     r = c.get("/best/signal", params={"q": args.q, "limit": args.limit})
     show("best/signal (your strategy → both venues compared)", t, r.json())
     sig = r.json().get("signal")
+    if sig:
+        print("   verdict:", (r.json()["best"].get("compare") or {}).get("verdict"))
+    else:
+        print("   no trade:", r.json().get("no_trade"))
+
+    # By hand: search matched markets by words, pick one, compare it on both venues.
+    t = time.monotonic()
+    found = c.get("/matches", params={"q": args.q, "limit": 5}).json()["matches"]
+    if found:
+        pick = found[0]
+        r = c.post("/best/preview", json={"match_id": pick["id"], "side": "yes", "size": args.size})
+        cmp = r.json().get("compare") or {}
+        print(f"\n== by hand ({time.monotonic() - t:.1f}s): {pick['outcome']} · {pick['title']}")
+        print("   ", (cmp.get("pair") or {}).get("note"))
+        for v in cmp.get("venues", []):
+            print(f"    {v['venue_name']:14} {v['price_label']} ({v['chance_label']}) fees {v['fees']} fillable {v['fillable']} total {v['total_cost']} {v['skip_reason'] or ''}")
+        print("   ", cmp.get("verdict") or r.json().get("error"))
 
     if sig:
         t = time.monotonic()
