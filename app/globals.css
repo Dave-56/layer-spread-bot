@@ -96,6 +96,17 @@ h3 { font-weight: 600; font-size: 15.5px; margin: 28px 0 8px; }
 .field input.wide { min-width: 200px; }
 .field.grow { flex: 1 1 420px; }
 .field input.search, .field.grow select { width: 100%; min-width: 420px; }
+/* The Game box: type to search, pick from the list under it. */
+.gamebox { position: relative; }
+.gamebox-list {
+  position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none;
+  max-height: 320px; overflow-y: auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+.gamebox-option { padding: 7px 10px; border-radius: 6px; font-size: 14px; color: var(--ink); cursor: pointer; }
+.gamebox-option.active { background: var(--paper-hover); }
+.gamebox-option[aria-selected="true"] { font-weight: 600; }
+.gamebox-note { padding: 7px 10px; font-size: 14px; color: var(--muted); }
 
 .btn {
   border: 1px solid var(--ink); background: var(--ink); color: var(--paper); border-radius: 6px; padding: 7px 14px;
