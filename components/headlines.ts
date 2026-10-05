@@ -8,13 +8,23 @@ import { count, money, side } from "./format";
 export interface Headline {
   title: string;
   detail: string;
+  /** A venue didn't answer: there's no answer yet, only "Try again". */
+  retry?: boolean;
 }
+
+// Best venue's two ways in, in the order shown. The first is the default view.
+export const HOW = [
+  { id: "manual", label: "Pick a game yourself" },
+  { id: "strategy", label: "Run a strategy" },
+] as const;
+export type How = (typeof HOW)[number]["id"];
+export const DEFAULT_HOW: How = HOW[0].id;
 
 const sentence = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
-/** Why a venue can't take the order, e.g. "Kalshi: market closed." */
+/** Why a venue can't take the order: the engine's sentence, e.g. "This market is closed on Kalshi." */
 export function skipLine(v: VenueRow): string {
-  return sentence(`${v.venue_name}: ${v.skip_reason ?? "can't fill it"}`);
+  return sentence(v.skip_reason ?? `${v.venue_name} can't take this order`);
 }
 
 /**
@@ -23,6 +33,9 @@ export function skipLine(v: VenueRow): string {
  */
 export function bestHeadline(c: CompareView, reasonCode?: string | null): Headline {
   const order = `${count(c.size)} ${side(c.side)}`;
+  // A venue that didn't answer isn't a venue that can't fill: there's no comparison yet.
+  if (c.unavailable?.length)
+    return { title: c.verdict, detail: c.venues.filter((v) => v.unavailable).map(skipLine).join(" "), retry: true };
   const skipped = c.venues.filter((v) => !v.ok).map(skipLine).join(" ");
   const chosen = c.venues.find((v) => v.cheaper);
   if (!chosen || !c.cheaper_name)

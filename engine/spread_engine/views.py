@@ -11,6 +11,12 @@ from uselayer import Match, VenueError
 VENUE_NAMES = {"kalshi": "Kalshi", "polymarket_us": "Polymarket US"}
 
 
+def venue_name(venue: str | None) -> str:
+    if venue is None:
+        return "The venue"
+    return {**VENUE_NAMES, "layer": "Layer"}.get(venue, venue)
+
+
 def market_view(m: Any) -> dict[str, Any]:
     return {
         "venue": m.venue,
@@ -87,30 +93,104 @@ def over(m: Match, now: datetime | None = None) -> bool:
 
 
 def error_view(e: Exception) -> dict[str, Any]:
+    """An error for the app: ``message`` is one plain sentence (:func:`plain_error`); ``detail`` keeps the SDK's own words."""
     if isinstance(e, VenueError):
-        return {"code": e.code, "message": e.message, "hint": getattr(e, "hint", None), "venue": e.venue}
-    return {"code": "error", "message": str(e) or type(e).__name__, "hint": None, "venue": None}
+        plain = plain_error(e)
+        return {
+            "code": e.code,
+            "message": plain,
+            # The SDK's hint is for a developer; a sentence we wrote already says what to do.
+            "hint": None if plain != e.message else getattr(e, "hint", None),
+            "venue": e.venue,
+            "unavailable": e.code in DIDNT_ANSWER,
+            "detail": e.message,
+        }
+    return {"code": "error", "message": str(e) or type(e).__name__, "hint": None, "venue": None, "unavailable": False, "detail": None}
+
+
+# A venue that didn't answer (busy, down, or a book too old to use): its price isn't known, which is
+# not the same as "it can't fill this".
+DIDNT_ANSWER = frozenset({"rate_limited", "venue_unavailable", "venue_maintenance", "stale_quote"})
+
+
+def plain_error(e: VenueError) -> str:
+    """The SDK's error as one plain sentence with the venue's name. Codes not listed keep the SDK's sentence."""
+    v = venue_name(e.venue)
+    code = e.code
+    if code == "rate_limited":
+        return f"{v} is busy right now. Try again in a few seconds."
+    if code == "venue_maintenance":
+        return f"{v} is down for maintenance. Try again later."
+    if code == "venue_unavailable":
+        return f"{v} didn't answer just now. Try again in a few seconds."
+    if code == "stale_quote":
+        return f"{v}'s prices are too old to use right now. Try again in a few seconds."
+    if code == "market_closed":
+        return f"This market is closed on {v}."
+    if code == "not_found":
+        return f"{v} doesn't know this market."
+    if code == "auth_failed":
+        if e.status is None:  # no key was given
+            return f"Add your {v} key to .env, then restart."
+        return f"{v} didn't accept your key. Check it in .env, then restart."
+    if code == "not_allowed":
+        return f"{v} doesn't let this account trade this market."
+    if code == "insufficient_balance":
+        return f"There isn't enough money in your {v} account for this order."
+    if code == "outcome_unknown":
+        return f"We don't know if {v} took the order. Check your {v} account before trying again."
+    if code == "venue_switched_off":
+        return f"This release doesn't trade on {v}."
+    if code == "killed":
+        return "The kill switch is on, so nothing was sent."
+    if code == "format_changed":
+        return f"{v} answered in a way this version of uselayer can't read. Update uselayer."
+    if code == "bad_data":
+        return f"{v} sent data we couldn't read. Try again in a few seconds."
+    if code == "not_available" and isinstance(e.raw, dict) and "venues" in e.raw:
+        return "Neither venue can take this order right now."
+    if code == "invalid_order" and e.venue:
+        return f"{v} turned this order down."
+    return e.message
+
+
+def busy_sentence(venues: Any, *, prices: bool = False) -> str:
+    """The venues that didn't answer, as the one sentence the app leads with.
+
+    ``prices=False`` (one comparison): "Couldn't get Polymarket US's price just now, so we can't compare yet."
+    ``prices=True`` (a strategy's reads): "Couldn't get Polymarket US's prices just now, so there's no answer yet."
+    """
+    venues = set(venues)
+    names = [VENUE_NAMES[v] for v in ("kalshi", "polymarket_us") if v in venues or VENUE_NAMES[v] in venues]
+    names += [venue_name(v) for v in sorted(venues) if v not in VENUE_NAMES and v not in VENUE_NAMES.values()]
+    who = " or ".join(f"{n}'s" for n in names) or "a venue's"
+    if prices:
+        return f"Couldn't get {who} prices just now, so there's no answer yet."
+    word = "price" if len(names) <= 1 else "prices"
+    return f"Couldn't get {who} {word} just now, so we can't compare yet."
 
 
 # ---- Best venue: the comparison as the app shows it -------------------------------------------
 
-# The SDK's skip codes (uselayer.best), in words.
+# The SDK's skip codes (uselayer.best) as one sentence each, for the codes skip_sentence() doesn't word
+# with the book's own numbers. {n} is the venue's name.
 SKIP = {
-    "switched_off": "venue switched off in this release",
-    "no_key": "no key for this venue",
-    "not_allowed": "not allowed by your rules",
-    "not_found": "market not found",
-    "market_closed": "market closed",
-    "no_book": "no book",
-    "stale_book": "book too old",
-    "no_offers": "nobody selling",
-    "above_max_price": "best price above your max",
-    "below_min_price": "best price below your min",
-    "not_enough_size": "not enough for sale within your max price",
-    "invalid_order": "breaks the market's tick or minimum",
-    "not_held": "you don't hold it here",
-    "unavailable": "venue didn't answer",
+    "switched_off": "This release doesn't trade on {n}.",
+    "no_key": "Add your {n} key to .env to price it here.",
+    "not_allowed": "Your rules don't allow this order on {n}.",
+    "not_found": "{n} doesn't know this market.",
+    "market_closed": "This market is closed on {n}.",
+    "no_book": "There's no book for this market on {n}.",
+    "stale_book": "{n}'s prices are too old to use right now. Try again in a few seconds.",
+    "no_offers": "Nobody is selling on {n} right now.",
+    "above_max_price": "{n}'s cheapest offer is above your limit.",
+    "below_min_price": "{n}'s best bid is below your minimum.",
+    "not_enough_size": "{n} doesn't have enough for sale within your limit.",
+    "invalid_order": "This order breaks {n}'s price step or minimum size.",
+    "not_held": "You don't hold enough of this on {n} to sell it.",
+    "unavailable": "{n} didn't answer just now. Try again in a few seconds.",
 }
+UNKNOWN_SKIPS = frozenset({"unavailable", "stale_book"})  # the venue's price isn't known
 
 
 def _num(x: float) -> str:
@@ -151,10 +231,40 @@ def pair_view(m: Match) -> dict[str, Any]:
     }
 
 
-def _venue_row(v: Any, chosen: str | None) -> dict[str, Any]:
-    reason = SKIP.get(v.skip, v.skip) if v.skip else None
-    if reason and v.detail:
-        reason = f"{reason}. {v.detail}"
+def _size(n: float) -> str:
+    return f"{n:,g}"
+
+
+def skip_sentence(v: Any, limit: float | None = None) -> str | None:
+    """Why a venue can't take the order (``uselayer.best.VenueCost.skip``), as one plain sentence."""
+    if not v.skip:
+        return None
+    n = VENUE_NAMES.get(v.venue, v.venue)
+    side = str(v.side).upper()
+    buy = getattr(v, "action", "buy") != "sell"
+    best, cap = cents_label(v.best_price), cents_label(getattr(v, "cap", None))
+    code = v.skip
+    if code == "unavailable":
+        said = (v.detail or "").lower()
+        if "too many requests" in said:
+            return f"{n} is busy right now. Try again in a few seconds."
+        if "maintenance" in said or "(503)" in said:
+            return f"{n} is down for maintenance. Try again later."
+        return f"{n} didn't answer just now. Try again in a few seconds."
+    if code == "no_offers":
+        return f"Nobody is {'selling' if buy else 'buying'} {side} on {n} right now."
+    if code == "above_max_price" and best and limit is not None:
+        return f"{n}'s cheapest offer is {best}, above your {cents_label(limit)} limit."
+    if code == "below_min_price" and best and limit is not None:
+        return f"{n}'s best bid is {best}, below your {cents_label(limit)} minimum."
+    if code == "not_enough_size" and cap:
+        if buy:
+            return f"{n} doesn't have {_size(v.size)} {side} for sale at {cap} or less."
+        return f"{n} isn't buying {_size(v.size)} {side} at {cap} or more."
+    return SKIP.get(code, "").format(n=n) or f"{n} can't take this order."
+
+
+def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[str, Any]:
     return {
         "venue": v.venue,
         "venue_name": VENUE_NAMES.get(v.venue, v.venue),
@@ -162,7 +272,9 @@ def _venue_row(v: Any, chosen: str | None) -> dict[str, Any]:
         "ok": v.ok,
         "cheaper": v.venue == chosen,
         "skip": v.skip,
-        "skip_reason": reason,
+        "skip_reason": skip_sentence(v, limit),
+        # The venue didn't answer (busy, down, a book too old): its price isn't known. Not "can't fill".
+        "unavailable": v.skip in UNKNOWN_SKIPS,
         "price": v.best_price,
         "price_label": cents_label(v.best_price),
         "chance_label": chance_label(v.best_price),
@@ -180,6 +292,9 @@ def verdict_line(why: Any) -> str:
     """The SDK's comparison as one sentence, from its own numbers."""
     chosen = why.chosen
     size = f"{why.size:,g}"
+    unknown = [v.venue for v in why.venues if v.skip in UNKNOWN_SKIPS]
+    if unknown:
+        return busy_sentence(unknown)
     if chosen is None:
         return "No trade: neither venue can fill this order right now."
     name = VENUE_NAMES.get(chosen.venue, chosen.venue)
@@ -200,18 +315,21 @@ def compare_view(m: Match, why: Any) -> dict[str, Any]:
 
     Every number is the SDK's; this only names and formats them.
     """
-    chosen = why.venue
+    # A venue that didn't answer leaves the comparison open: the other isn't "cheaper" or "the only one".
+    unknown = [VENUE_NAMES.get(v.venue, v.venue) for v in why.venues if v.skip in UNKNOWN_SKIPS]
+    chosen = None if unknown else why.venue
     return {
         "action": why.action,
         "side": why.side,
         "size": why.size,
         "max_price": why.limit,
         "pair": pair_view(m),
-        "venues": [_venue_row(v, chosen) for v in why.venues],
+        "venues": [_venue_row(v, chosen, why.limit) for v in why.venues],
         "cheaper": chosen,
         "cheaper_name": VENUE_NAMES.get(chosen, chosen) if chosen else None,
-        "saving": why.saving,
-        "saving_label": money_label(why.saving),
+        "unavailable": unknown,  # venue names that didn't answer: compare again, don't trade
+        "saving": None if unknown else why.saving,
+        "saving_label": None if unknown else money_label(why.saving),
         "verdict": verdict_line(why),
         "as_of": why.as_of.isoformat(),
     }

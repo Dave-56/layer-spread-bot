@@ -118,7 +118,7 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
     try:
         q = client.quote(m, size=s.size, min_edge=s.min_edge)
     except VenueError as e:
-        return drop("unpriced", "Couldn't read the prices: " + error_view(e)["message"])
+        return drop("unpriced", error_view(e)["message"])
     row["quote"] = quote_view(q)
 
     if q.a is None or q.b is None or q.gross_at_best is None or q.edge_at_best is None:

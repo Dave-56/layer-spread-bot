@@ -4,7 +4,7 @@ With uselayer, your trading bot keeps its own strategy and gains two abilities: 
 
 Spread runs on your machine, with your own keys, across **Kalshi** and **Polymarket US**. It has two screens:
 
-- **Best venue.** Your strategy (or you, by hand) decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it sends the order to the cheaper one.
+- **Best venue.** You (by hand) or your strategy decide the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it shows which venue is cheaper for that exact order, after fees. It sends nothing.
 - **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: the rules differ, a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see gross spread → fees → net → return per day, and you can paper-trade both legs.
 
 An optional chat panel answers the same questions in plain English, with your own LLM key.
@@ -48,7 +48,9 @@ Keys in `.env`:
 
 ## Strategies
 
-Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the Best venue screen lists every file there, grouped by category.
+The Best venue screen opens on "Pick a game yourself": search for any game or market (blank lists every open game), pick the outcome, YES or NO and contracts (100 to start), and compare. "Run a strategy" is next to it.
+
+Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the strategy dropdown on the Best venue screen lists every file there, grouped by category.
 
 It comes with examples named the way people trade. They're examples, not advice: none of them is a reason to expect a profit.
 
@@ -62,13 +64,11 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
-"Pick a game yourself" on the same screen skips the strategy: search for any game or market, pick the outcome, YES or NO and contracts (a max price is under Settings).
-
 ### Add your own
 
-1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`, or press "Download the starter file" on the "Add your own" card of the Best venue screen and save it under a new name.
+1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`. Or choose "Add your own (.py)…" in the strategy dropdown, close the file picker, press "starter file" and save it under a new name.
 2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
-3. Press "Upload a .py file" on the same card: it saves your file in that folder and selects it. (A file you copied into the folder shows up when you reload the page.) Edits to a strategy apply on the next run, without a restart.
+3. Choose "Add your own (.py)…" in the strategy dropdown and pick your file: it saves the file in that folder and selects it. (A file you copied into the folder shows up when you reload the page.) Edits to a strategy apply on the next run, without a restart.
 
 The starter file itself isn't in the list, since it never trades.
 
@@ -98,10 +98,10 @@ A strategy file is your own Python, run by the engine on your machine with your 
 
 ## Paper and live
 
-- **Paper (the default).** Orders fill against the venues' real order books with fake money, in the bot's own store (`~/.uselayer/spread-bot/paper.db`, or `BOT_STORE_DIR`). Nothing reaches a venue. The "Paper account" line shows what's open and how much of your limit it uses; "Reset" starts the fake account over.
+- **Paper (the default).** Orders fill against the venues' real order books with fake money, in the bot's own store (`~/.uselayer/spread-bot/paper.db`, or `BOT_STORE_DIR`). Nothing reaches a venue. The "Paper account" line on the Arbitrage screen shows what's open and how much of your limit it uses; "Reset" starts the fake account over.
 - **Live.** Set `BOT_MODE=live` in `.env` and add the key for each venue you'll trade, then restart. Orders are then real, with your money. The header shows a red LIVE badge. Only the exact word `live` turns it on. If your account already has orders or positions, the SDK starts a new live store with its kill switch on: check them, then run `uv run python -m uselayer resume --mode live` in `engine/`.
 - Live or paper, every order goes through the SDK's guardrails: a budget across everything (`BOT_BUDGET`, default $100), a price collar, and a kill switch. To stop everything from any terminal: `cd engine && uv run python -m uselayer kill --mode paper --store ~/.uselayer/spread-bot/paper.db` (or `live.db` with `--mode live`).
-- A comparison is a snapshot of both books when you ran it. A book can move before an order arrives. The order's limit price (shown as "pays at most") caps what it can pay, and it's immediate-or-cancel: it fills what's there at that price, and the rest is cancelled. The arbitrage trade reads both books again first and sends nothing if the gap is gone.
+- A comparison is a snapshot of both books when you ran it. A book can move before an order arrives. The order's limit price caps what it can pay, and it's immediate-or-cancel: it fills what's there at that price, and the rest is cancelled. The arbitrage trade reads both books again first and sends nothing if the gap is gone.
 
 ## How the arbitrage scan works
 
@@ -141,8 +141,11 @@ npm test          # app tests (vitest) + engine tests (pytest); no network
 npm run smoke     # every engine route against the real venues, in paper mode; needs your keys in .env
 ```
 
+To see the screen Polymarket US's "too many requests" leads to without waiting for one, start with `SPREAD_FAKE_BUSY=polymarket_us npm run dev` (paper mode only): every Polymarket US book read then answers "busy".
+
 ## Notes
 
 - The engine needs uselayer 0.4.0 or later (`engine/pyproject.toml`), from PyPI.
+- Polymarket US answers "too many requests" after about 5 order-book reads in 10 seconds from one IP address by a Python program (measured; it isn't published), and every Python program on your network shares that. So the engine reads at most 4 Polymarket US books in any 10 seconds, reads a strategy's games one at a time, reuses a book for 3 seconds while comparing (never for an order), and after a "too many requests" waits as long as Polymarket US asks (`engine/spread_engine/reads.py`). If Polymarket US is still busy, the screen says so and offers "Try again"; it never calls Kalshi "the only venue" because Polymarket US didn't answer.
 - Spread never calls anything "risk-free": a gap can close before both orders fill, and venues can settle the same event differently.
 - MIT licensed.

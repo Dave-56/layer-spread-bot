@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { alreadyExists, bestHeadline, matchNote, strategyNoTrade } from "@/components/headlines";
+import { skipText } from "@/components/format";
+import { alreadyExists, bestHeadline, DEFAULT_HOW, HOW, matchNote, strategyNoTrade } from "@/components/headlines";
 import type { CompareView, VenueRow } from "@/lib/engine";
 
 const row = (v: Partial<VenueRow>): VenueRow => ({
@@ -10,6 +11,7 @@ const row = (v: Partial<VenueRow>): VenueRow => ({
   cheaper: false,
   skip: null,
   skip_reason: null,
+  unavailable: false,
   price: 0.54,
   price_label: "54¢",
   chance_label: "54%",
@@ -41,6 +43,7 @@ const cmp = (c: Partial<CompareView>): CompareView => ({
   venues: [kalshi({ total_cost: 54.4 }), pm({ cheaper: true, total_cost: 52.6 })],
   cheaper: "polymarket_us",
   cheaper_name: "Polymarket US",
+  unavailable: [],
   saving: 1.8,
   saving_label: "$1.80",
   verdict: "Polymarket US is $1.80 cheaper for 100 contracts, fees included: $52.60 vs $54.40.",
@@ -57,10 +60,16 @@ describe("bestHeadline", () => {
   });
   it("says when only one venue can fill, with the engine's reason for the other", () => {
     const h = bestHeadline(
-      cmp({ venues: [kalshi({ ok: false, skip: "market_closed", skip_reason: "market closed", total_cost: null }), pm({ cheaper: true, total_cost: 1.07 })] }),
+      cmp({
+        venues: [
+          kalshi({ ok: false, skip: "market_closed", skip_reason: "This market is closed on Kalshi.", total_cost: null }),
+          pm({ cheaper: true, total_cost: 1.07 }),
+        ],
+      }),
     );
     expect(h.title).toBe("Buy on Polymarket US: the only venue that can fill 100 YES");
-    expect(h.detail).toBe("$1.07, fees included. Kalshi: market closed.");
+    expect(h.detail).toBe("$1.07, fees included. This market is closed on Kalshi.");
+    expect(h.retry).toBeUndefined();
   });
   it("says no trade when neither venue can fill, without doubling a full stop", () => {
     const h = bestHeadline(
@@ -69,19 +78,64 @@ describe("bestHeadline", () => {
         cheaper_name: null,
         side: "no",
         venues: [
-          kalshi({ ok: false, skip_reason: "best price above your max. The best ask is 0.98, above max_price 0.97." }),
-          pm({ ok: false, skip_reason: "nobody selling" }),
+          kalshi({ ok: false, skip_reason: "Kalshi's cheapest offer is 98¢, above your 97¢ limit." }),
+          pm({ ok: false, skip_reason: "Nobody is selling NO on Polymarket US right now." }),
         ],
       }),
     );
     expect(h.title).toBe("No trade: neither venue can fill 100 NO right now");
-    expect(h.detail).toBe("Kalshi: best price above your max. The best ask is 0.98, above max_price 0.97. Polymarket US: nobody selling.");
+    expect(h.detail).toBe("Kalshi's cheapest offer is 98¢, above your 97¢ limit. Nobody is selling NO on Polymarket US right now.");
+  });
+  it("never calls the other venue the only one when a venue didn't answer", () => {
+    // The owner's case: Kalshi priced it, Polymarket US said "too many requests".
+    const h = bestHeadline(
+      cmp({
+        cheaper: null,
+        cheaper_name: null,
+        saving: null,
+        saving_label: null,
+        unavailable: ["Polymarket US"],
+        verdict: "Couldn't get Polymarket US's price just now, so we can't compare yet.",
+        venues: [
+          kalshi({ total_cost: 33.53 }),
+          pm({ ok: false, skip: "unavailable", unavailable: true, skip_reason: "Polymarket US is busy right now. Try again in a few seconds.", total_cost: null }),
+        ],
+      }),
+      "only_venue",
+    );
+    expect(h).toEqual({
+      title: "Couldn't get Polymarket US's price just now, so we can't compare yet.",
+      detail: "Polymarket US is busy right now. Try again in a few seconds.",
+      retry: true,
+    });
+    expect(`${h.title} ${h.detail}`).not.toMatch(/only venue|Buy on|too many requests|polymarket_us/);
   });
   it("words a tie and a tiny saving plainly", () => {
     expect(bestHeadline(cmp({}), "tie_first_listed").title).toBe("Buy on Polymarket US: same price on both venues for 100 YES");
     expect(bestHeadline(cmp({ saving: 0.002, saving_label: "$0.00" })).title).toBe(
       "Buy on Polymarket US: less than 1¢ cheaper for 100 YES, after fees",
     );
+  });
+});
+
+describe("Best venue's two ways in", () => {
+  it("opens on Pick a game yourself, with Run a strategy second", () => {
+    expect(DEFAULT_HOW).toBe("manual");
+    expect(HOW.map((h) => h.label)).toEqual(["Pick a game yourself", "Run a strategy"]);
+  });
+});
+
+describe("skipText", () => {
+  it("words every skip code as one sentence with the venue's name, never the SDK's words", () => {
+    const codes = ["switched_off", "no_key", "not_allowed", "not_found", "market_closed", "no_book", "stale_book", "no_offers", "above_max_price", "below_min_price", "not_enough_size", "invalid_order", "not_held", "unavailable"];
+    for (const code of codes) {
+      const s = skipText(code, "Polymarket US");
+      expect(s).toMatch(/Polymarket US/);
+      expect(s).toMatch(/\.$/);
+      expect(s).not.toMatch(/_|max_price|polymarket_us/);
+    }
+    expect(skipText("unavailable", "Polymarket US")).toBe("Polymarket US didn't answer just now. Try again in a few seconds.");
+    expect(skipText("something_new", "Kalshi")).toBe("Kalshi can't take this order.");
   });
 });
 
