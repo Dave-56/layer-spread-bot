@@ -16,7 +16,7 @@ It's paper mode by default: real order books, fake money.
 | Piece | Where it runs |
 |---|---|
 | Which markets are the same bet, and where their rules differ | Layer's hosted matching (`GET /v0/matches`), called by the SDK with your `LAYER_API_KEY` |
-| Venue prices and order books, fees, quotes, orders, positions, paper fills | The [uselayer](https://github.com/Dave-56/uselayer-sdk) Python SDK, on your machine, talking to each venue with your own keys |
+| Venue prices and order books, fees, quotes, orders, positions, paper fills | The [uselayer](https://pypi.org/project/uselayer/) Python SDK, on your machine, talking to each venue with your own keys |
 | The engine (`engine/`): a small local service that runs the SDK for the app | Your machine, `127.0.0.1:8765`. It answers only this machine. |
 | The app (`app/`, `components/`): the two screens and the chat | Your machine, `127.0.0.1:3200` |
 | The chat's answers | The LLM you choose (Anthropic or OpenRouter), with your key |
@@ -98,6 +98,6 @@ npm run smoke     # every engine route against the real venues, in paper mode; n
 
 ## Notes
 
-- The engine pins the uselayer SDK to a commit (see `engine/pyproject.toml`) until the release with best-venue orders and return per day is on PyPI.
+- The engine needs uselayer 0.4.0 or later (`engine/pyproject.toml`), from PyPI.
 - Spread never calls anything "risk-free": a gap can close before both orders fill, and venues can settle the same event differently.
 - MIT licensed.

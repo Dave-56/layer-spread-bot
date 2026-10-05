@@ -7,10 +7,8 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "python-dotenv>=1.0",
-  # Pinned to uselayer-sdk PR #35 (return per day on quote()), which sits on main with
-  # buy_best/preview_best (#33), the gross spread (#32) and fresh books (#34). Switch to
-  # "uselayer>=<next release>" once that release is on PyPI.
-  "uselayer @ git+https://github.com/Dave-56/uselayer-sdk@bd69053634e7686913f599204ee37252adb83798#subdirectory=python",
+  # 0.4.0: buy_best/preview_best, the gross spread and return per day on quote().
+  "uselayer>=0.4.0,<0.5",
 ]
 
 [dependency-groups]
@@ -22,9 +20,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["spread_engine"]
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

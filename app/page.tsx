@@ -77,7 +77,7 @@ export default function Page() {
 
             <p className="small muted" style={{ marginTop: 40 }}>
               Runs on your machine. Layer finds which markets are the same bet; prices, books, fees and orders run in the{" "}
-              <a href="https://github.com/Dave-56/uselayer-sdk">uselayer</a> SDK with your own keys
+              <a href="https://pypi.org/project/uselayer/">uselayer</a> SDK with your own keys
               {status ? ` (v${status.sdk_version})` : ""}.
             </p>
           </div>

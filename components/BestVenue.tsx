@@ -135,6 +135,12 @@ export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
 
   const s = res?.signal;
   const why = res?.best?.why;
+  const p = res?.best?.preview;
+  // What the SDK's guardrails said about the chosen order, before anything is sent.
+  const blocked =
+    p && !p.allowed
+      ? [p.rules.decision.reason ?? (p.blocked_by ? `Blocked by ${p.blocked_by}.` : null), ...p.problems].filter(Boolean).join(" ")
+      : null;
   return (
     <section>
       <h2>Best venue</h2>
@@ -187,9 +193,19 @@ export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
           <p className={why.venue ? "" : "error"}>
             {why.venue ? verdictLine(why) : "No venue can take this order right now, so nothing is sent."}
           </p>
+          {why.venue && blocked && (
+            <div className="box warn">
+              <div className="label">Your rules say no</div>
+              {blocked}
+              <div className="small muted">
+                Guardrails run before anything is sent. Change them in <code>.env</code> (<code>BOT_BUDGET</code>) or close
+                positions first.
+              </div>
+            </div>
+          )}
           {why.venue && (
             <div className="row">
-              <button className="btn" onClick={buy} disabled={busy !== null}>
+              <button className="btn" onClick={buy} disabled={busy !== null || blocked !== null}>
                 {busy === "buy"
                   ? "Sending…"
                   : mode === "live"

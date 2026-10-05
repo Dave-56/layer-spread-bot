@@ -510,7 +510,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "uselayer", git = "https://github.com/Dave-56/uselayer-sdk?subdirectory=python&rev=bd69053634e7686913f599204ee37252adb83798" },
+    { name = "uselayer", specifier = ">=0.4.0,<0.5" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
@@ -556,13 +556,17 @@ wheels = [
 
 [[package]]
 name = "uselayer"
-version = "0.3.0"
-source = { git = "https://github.com/Dave-56/uselayer-sdk?subdirectory=python&rev=bd69053634e7686913f599204ee37252adb83798#bd69053634e7686913f599204ee37252adb83798" }
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/8c/c40c044e64b52a6dc6a1bee7cbce185889156c4578bad257ffb40b212d40/uselayer-0.4.0.tar.gz", hash = "sha256:0640b4da2ad862a4531631ca1131508b0e98b468f07effc3178f330171720762", size = 265715, upload-time = "2026-10-05T01:52:01.94Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/c6/1bbf0b39a5bb7df29d36fc970d23312309c2212c3ee07af899308e5008d5/uselayer-0.4.0-py3-none-any.whl", hash = "sha256:fe6c44b921102343b1967c84f7f153c4e2e8d360f657ec191ae75bd7500a2ca9", size = 184962, upload-time = "2026-10-05T01:52:00.137Z" },
 ]
 
 [[package]]

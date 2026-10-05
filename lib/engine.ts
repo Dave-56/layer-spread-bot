@@ -91,12 +91,22 @@ export interface OrderView {
   mode: string;
 }
 
+// What the SDK's guardrails say about the order before it's sent (uselayer Preview).
+export interface PreviewView {
+  allowed: boolean;
+  blocked_by: string | null;
+  needs_approval: boolean;
+  problems: string[];
+  rules: { decision: { result: string; rule: string | null; reason: string | null } };
+}
+
 export interface BestResult {
   ok?: boolean;
   error?: EngineError;
   sent?: boolean;
   order?: OrderView | null;
   why?: BestVenue;
+  preview?: PreviewView | null;
   mode?: string;
 }
 
