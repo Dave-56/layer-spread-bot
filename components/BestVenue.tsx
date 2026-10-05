@@ -147,13 +147,13 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
             <div key={venue} className={`venue-cell ${v?.cheaper ? "cheaper" : ""} ${v && !v.ok ? "out" : ""}`}>
               <div className="venue-name">
                 {v?.venue_name ?? VENUE_NAME[venue]}
-                {v?.cheaper && <span className="pill good">Cheaper</span>}
+                {v?.cheaper && <span className="pill good">{c?.spend != null ? c.pick_label : "Cheaper"}</span>}
               </div>
               <div className="venue-q">{p?.question ?? p?.title ?? mk.question ?? mk.event ?? mk.market_id}</div>
               {v &&
                 (v.ok ? (
                   <>
-                    <div className="venue-chance">{v.chance_label ?? "—"}</div>
+                    <div className="venue-chance">{(c?.spend != null && v.win_line) || v.chance_label || "—"}</div>
                     <div className="small muted">{v.cost_line ?? `${side(c!.side)} at ${v.price_label ?? "—"}`}</div>
                   </>
                 ) : (
@@ -185,17 +185,20 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
 
 /** Each venue's numbers for the whole order, as the engine labels them. */
 function Numbers({ c }: { c: CompareView }) {
+  const dollars = c.spend != null;
   return (
     <table className="t">
       <thead>
         <tr>
           <th>Venue</th>
+          {dollars && <th className="num">Contracts</th>}
           <th className="num">Avg price</th>
           <th className="num">Fees</th>
           <th className="num" title="Whole contracts for sale at or under the price it would pay">
             For sale
           </th>
           <th className="num">Total cost</th>
+          {dollars && <th className="num">Wins</th>}
         </tr>
       </thead>
       <tbody>
@@ -205,12 +208,14 @@ function Numbers({ c }: { c: CompareView }) {
               {v.venue_name}
               {!v.ok && <div className="small muted">{skipLine(v)}</div>}
             </td>
+            {dollars && <td className="num">{v.contracts == null ? "—" : count(v.contracts)}</td>}
             <td className="num">{v.avg_price_label ?? "—"}</td>
             <td className="num">{money(v.fees)}</td>
             <td className="num">{count(v.fillable)}</td>
             <td className="num">
               <b>{money(v.total_cost)}</b>
             </td>
+            {dollars && <td className="num">{v.payout == null ? "—" : money(v.payout)}</td>}
           </tr>
         ))}
       </tbody>
@@ -231,7 +236,8 @@ const post = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-const orderOf = (t: Signal) => ({ match_id: t.match_id, side: t.side, size: t.size, max_price: t.max_price });
+const orderOf = (t: Signal) =>
+  t.spend != null ? { match_id: t.match_id, side: t.side, spend: t.spend } : { match_id: t.match_id, side: t.side, size: t.size, max_price: t.max_price };
 
 type Busy = null | "run" | "find";
 
@@ -290,20 +296,17 @@ function TryAgain({ onClick, busy }: { onClick: () => void; busy: boolean }) {
   );
 }
 
-/**
- * The match, the two venues' markets, then the answer. Numbers folded below. Nothing is sent from here.
- * `onSize`: the chooser's contracts box, kept in step when "Compare N instead" changes the size.
- */
-function TradeResult({ t, onSize }: { t: Trade; onSize?: (n: number) => void }) {
+/** The match, the two venues' markets, then the answer. Numbers folded below. Nothing is sent from here. */
+function TradeResult({ t }: { t: Trade }) {
   const { trade, best, busy } = t;
   const ref = useShowWhenReady(best);
   if (!trade || !best) return null;
   const c = best.ok ? best.compare : undefined;
-  const h = c ? bestHeadline(c, best.why?.reason_code) : null;
+  const h = c ? (c.headline ?? bestHeadline(c, best.why?.reason_code)) : null;
   return (
     <div className="result" ref={ref}>
       <div className="kicker">
-        {trade.picked}: buy {count(trade.size)} {side(trade.side)}
+        {trade.picked}: {trade.spend != null ? `${c?.spend_label ?? money(trade.spend)} on` : `buy ${count(trade.size ?? 0)}`} {side(trade.side)}
         {trade.max_price != null ? `, at most ${cents(trade.max_price)} each` : ""}
         {trade.why ? <span className="muted"> · {trade.why}</span> : null}
       </div>
@@ -327,10 +330,7 @@ function TradeResult({ t, onSize }: { t: Trade; onSize?: (n: number) => void }) 
               <button
                 className="btn"
                 disabled={busy !== null}
-                onClick={() => {
-                  onSize?.(c.try_size!);
-                  t.compare({ ...trade, size: c.try_size! }, trade.picked);
-                }}
+                onClick={() => t.compare({ ...trade, size: c.try_size! }, trade.picked)}
               >
                 {busy ? "Checking…" : `Compare ${count(c.try_size)} instead`}
               </button>
@@ -513,7 +513,7 @@ function ManualMode() {
   const [current, setCurrent] = useState<Game | null>(null);
   const [mid, setMid] = useState("");
   const [mSide, setMSide] = useState<"yes" | "no">("yes");
-  const [mSize, setMSize] = useState(100);
+  const [mSpend, setMSpend] = useState(50);
   const { fail } = t;
 
   function pickGame(g: Game) {
@@ -536,7 +536,7 @@ function ManualMode() {
 
   function compare() {
     if (!picked) return;
-    t.compare({ match_id: picked.id, side: mSide, size: mSize, max_price: null, why: "", match: picked }, "Your trade");
+    t.compare({ match_id: picked.id, side: mSide, size: null, spend: mSpend, max_price: null, why: "", match: picked }, "Your trade");
   }
 
   return (
@@ -578,8 +578,8 @@ function ManualMode() {
               </div>
             </div>
             <label className="field narrow">
-              Contracts
-              <input type="number" min={1} value={mSize} onChange={(e) => setMSize(Math.max(1, +e.target.value || 1))} />
+              Amount ($)
+              <input type="number" min={1} step={1} value={mSpend} onChange={(e) => setMSpend(Math.max(1, +e.target.value || 1))} />
             </label>
             <button className="btn big" onClick={compare} disabled={t.busy !== null || !picked}>
               {t.busy === "run" ? "Comparing…" : "Compare venues"}
@@ -588,7 +588,7 @@ function ManualMode() {
         </>
       )}
       <Working t={t} />
-      <TradeResult t={t} onSize={setMSize} />
+      <TradeResult t={t} />
     </>
   );
 }

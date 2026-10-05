@@ -35,11 +35,12 @@ from typing import Any
 import uselayer
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from uselayer import Client, Match, VenueError
 from uselayer.guardrails import order_risk
 
 from . import config, every_market, recorder, replay, strategies
+from . import spend as by_dollar
 from .funnel import ScanSettings, quote_view, scan
 from .reads import GatewayReads, cached_books
 from .strategies import upcoming
@@ -296,8 +297,15 @@ def matches(
 class BestBody(BaseModel):
     match_id: str
     side: str = Field(pattern="^(yes|no)$")
-    size: int = Field(gt=0, le=100_000)
+    size: int | None = Field(default=None, gt=0, le=100_000)  # contracts, or
+    spend: float | None = Field(default=None, gt=0, le=by_dollar.MAX_SPEND)  # dollars (Best venue's Amount box)
     max_price: float | None = Field(default=None, gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _one_size(self) -> BestBody:
+        if (self.size is None) == (self.spend is None):
+            raise ValueError("Give either size (contracts) or spend (dollars).")
+        return self
 
 
 def _best_view(m: Match, r: Any) -> dict[str, Any]:
@@ -378,7 +386,18 @@ def _price(m: Match, side: str, size: int, max_price: float | None = None) -> di
 
 
 def _preview(b: BestBody) -> dict[str, Any]:
-    return _price(_find(b.match_id), b.side, b.size, b.max_price)
+    if b.spend is not None:
+        return _spend(_find(b.match_id), b.side, b.spend)
+    return _price(_find(b.match_id), b.side, b.size, b.max_price)  # type: ignore[arg-type]
+
+
+def _spend(m: Match, side: str, amount: float) -> dict[str, Any]:
+    """``amount`` dollars on ``side``: the most each venue sells for it, and which pays more if you win.
+    Each book is read once; every size is then priced by the SDK against those books (spend.py)."""
+    c = client()
+    books, failed = by_dollar.read_books(c, m)
+    view = by_dollar.books_view(m, side, amount, books, rules=c.rules, failed=failed, collar=c.rules.price_collar)
+    return {"ok": True, "compare": view}
 
 
 @app.post("/best/preview")
@@ -389,6 +408,8 @@ def best_preview(b: BestBody) -> dict[str, Any]:
 
 @app.post("/best/buy")
 def best_buy(b: BestBody) -> dict[str, Any]:
+    if b.size is None:
+        raise HTTPException(422, "Buying takes a number of contracts (size).")
     m = _find(b.match_id)
     r = client().buy_best(m, b.side, b.size, max_price=b.max_price)
     return {"mode": settings.mode, **_best_view(m, r)}

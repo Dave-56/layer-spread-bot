@@ -50,7 +50,7 @@ Keys in `.env`:
 
 Once http://127.0.0.1:3200 is open. Everything here uses real order books and fake money.
 
-- **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and how many contracts, and press **Compare venues**. You see each venue's price and which one is cheaper for that order, after fees. This tab never sends an order.
+- **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and an amount in dollars, and press **Compare venues**. You see what that amount wins on each venue if you're right, fees included, and which one pays more. Each venue gets its own size: the most whole contracts the amount buys there. This tab never sends an order.
 - **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each market is compared on both venues, biggest saving first.
 - **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
 - **Arbitrage → Replay.** Pick a game that's on now and press **Save prices**. When it's done, press **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
