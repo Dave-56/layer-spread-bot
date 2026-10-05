@@ -113,6 +113,54 @@ SKIP = {
 }
 
 
+# The same skip codes as one plain sentence, naming the venue. The SDK's own ``detail`` speaks in its
+# settings ("above max_price 0.97", "max_quote_age_s"); this never does.
+SKIP_LINE = {
+    "switched_off": "{name} is switched off in this release.",
+    "no_key": "There's no {name} key on this machine.",
+    "not_allowed": "Your rules don't allow trading on {name}.",
+    "not_found": "{name} doesn't list this market.",
+    "market_closed": "{name} isn't taking orders on this market right now.",
+    "no_book": "{name} has no prices for this market.",
+    "stale_book": "{name}'s prices didn't refresh in time to compare.",
+    "no_offers": "Nobody is selling {side} on {name} right now.",
+    "above_max_price": "{name}'s cheapest {side} costs more than your max price.",
+    "below_min_price": "{name}'s best bid is below your min price.",
+    "not_enough_size": "{name} doesn't have {size} {side} for sale near its best price.",
+    "invalid_order": "{name} won't take an order of this size or price.",
+    "not_held": "You don't hold this on {name}.",
+    "unavailable": "{name} didn't answer in time.",
+}
+
+# A comparison that failed outright (``VenueError``), by its code, as one plain sentence.
+ERROR_LINE = {
+    "rate_limited": "{name} is getting too many requests right now. Try again in a minute.",
+    "venue_unavailable": "{name} didn't answer in time.",
+    "venue_maintenance": "{name} is down for maintenance.",
+    "stale_quote": "{name}'s prices didn't refresh in time to compare.",
+    "not_found": "{name} doesn't list this market.",
+}
+
+
+def skip_line(v: Any) -> str | None:
+    """Why a venue can't take the order, as one plain sentence: "Nobody is selling YES on Kalshi right now."."""
+    if not v.skip:
+        return None
+    name = VENUE_NAMES.get(v.venue, v.venue)
+    return SKIP_LINE.get(v.skip, "{name} can't fill it right now.").format(
+        name=name, side=str(v.side).upper(), size=f"{v.size:,g}"
+    )
+
+
+def error_line(e: Exception) -> str:
+    """A comparison that couldn't run, as one plain sentence."""
+    if isinstance(e, VenueError):
+        name = VENUE_NAMES.get(e.venue or "", "A venue") if e.venue else "A venue"
+        if e.code in ERROR_LINE:
+            return ERROR_LINE[e.code].format(name=name)
+    return "Couldn't read the prices for this one. Try again in a minute."
+
+
 def _num(x: float) -> str:
     return f"{round(x, 1):g}"
 
@@ -163,6 +211,7 @@ def _venue_row(v: Any, chosen: str | None) -> dict[str, Any]:
         "cheaper": v.venue == chosen,
         "skip": v.skip,
         "skip_reason": reason,
+        "skip_line": skip_line(v),
         "price": v.best_price,
         "price_label": cents_label(v.best_price),
         "chance_label": chance_label(v.best_price),
