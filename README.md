@@ -46,6 +46,17 @@ Keys in `.env`:
 | `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` | Live orders only. Paper mode reads Polymarket US's public books without a key. | polymarket.us/developer |
 | `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | The optional chat panel | console.anthropic.com, or openrouter.ai |
 
+## Try it in paper mode
+
+Once http://127.0.0.1:3200 is open. Everything here uses real order books and fake money.
+
+- **Best venue → Pick a game yourself.** Choose a game, an outcome, YES or NO and how many contracts, then press **Compare venues**. You see each venue's price and which one is cheaper for that order, after fees. This tab never sends an order.
+- **Best venue → Run a strategy.** Pick an example strategy and press **Run**. It picks a trade, and you see which venue is cheaper for it.
+- **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each market is compared on both venues, biggest saving first.
+- **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
+- **Arbitrage → Replay.** Pick saved prices and press **Replay** to see whether a past gap was real money (see [Replay prices you saved](#replay-prices-you-saved)).
+- **Paper account.** After a paper trade, a line at the top of the Arbitrage tab shows what's open. **Reset** starts the fake account over.
+
 ## Strategies
 
 The Best venue screen opens on "Pick a game yourself": search for any game or market (blank lists every open game), pick the outcome, YES or NO and contracts (100 to start), and compare. "Run a strategy" and "Every market" are next to it.
