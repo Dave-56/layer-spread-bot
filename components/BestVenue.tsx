@@ -9,14 +9,15 @@ import {
   type MatchView,
   type Signal,
   type StrategyInfo,
+  type StrategyList,
 } from "@/lib/engine";
-import { CAVEAT, cents, count, money, side, SKIP, when } from "./format";
+import { cents, count, money, side, SKIP, when } from "./format";
 import { fetchAccount, traded, type Account } from "./PaperAccount";
 
 // Job 1: your strategy already knows the trade. The bot prices that exact order on both venues,
 // after fees and depth, and sends it where it's cheaper for that size.
 
-const ADD_YOUR_OWN = "https://github.com/Dave-56/layer-spread-bot#add-your-strategy";
+const ADD_YOUR_OWN = "https://github.com/Dave-56/layer-spread-bot#add-your-own";
 
 /** The SDK's comparison as one sentence, from its own numbers. */
 export function verdictLine(why: Why): string {
@@ -88,9 +89,9 @@ export function MatchLine({ m }: { m: MatchView }) {
       ) : (
         "Polymarket US"
       )}
-      {m.caveats.length > 0 && (
+      {m.rule_warning && (
         <span className="pill warn" style={{ marginLeft: 6 }}>
-          rules differ: {m.caveats.map((c) => CAVEAT[c] ?? c).join(", ")}
+          {m.rule_warning}
         </span>
       )}
     </div>
@@ -103,6 +104,8 @@ interface Looked extends MatchView {
 
 interface SignalResult {
   signal: Signal | null;
+  no_trade?: string | null; // the strategy's own sentence
+
   matches: number;
   started?: number;
   looked?: Looked[];
@@ -111,6 +114,7 @@ interface SignalResult {
 
 /** Why a strategy made no trade, in one plain sentence. */
 function noTradeLine(r: SignalResult, s: StrategyInfo | undefined): string {
+  if (r.no_trade) return r.no_trade;
   const started = r.started ?? 0;
   const looked = r.looked ?? [];
   if (!looked.length && started) return `No trade: all ${started} games had already started.`;
@@ -131,7 +135,9 @@ export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
   const [how, setHow] = useState<"strategy" | "manual">("strategy");
   const [q, setQ] = useState("");
   const [list, setList] = useState<StrategyInfo[]>([]);
-  const [pick, setPick] = useState("first_match");
+  const [groups, setGroups] = useState<string[]>([]);
+  const [pick, setPick] = useState("sports_favorite");
+  const [added, setAdded] = useState<string | null>(null);
   // manual: a market from the search, side, contracts, max price
   const [found, setFound] = useState<MatchView[] | null>(null);
   const [mid, setMid] = useState("");
@@ -150,10 +156,32 @@ export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
   const [acct, setAcct] = useState<Account | null>(null);
 
   useEffect(() => {
-    getJson<{ strategies: StrategyInfo[] }>("/engine/strategies")
-      .then((b) => setList(b.strategies))
+    getJson<StrategyList>("/engine/strategies")
+      .then((b) => {
+        setList(b.strategies);
+        setGroups(b.categories);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
+
+  // Add your own strategy file: the engine saves it in strategies/ and checks it loads.
+  async function addFile(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setAdded(null);
+    try {
+      const b = await getJson<StrategyList & { added: StrategyInfo }>("/engine/strategies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ filename: file.name, code: await file.text() }),
+      });
+      setList(b.strategies);
+      setPick(b.added.id);
+      setAdded(`Added ${file.name}: it's now "${b.added.name}" under ${b.added.category}.`);
+    } catch (e) {
+      fail(e);
+    }
+  }
 
   // After the paper account is reset, price the same trade again: the old verdict is stale.
   useEffect(() => {
@@ -308,10 +336,17 @@ export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
             <label className="field">
               Strategy
               <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ minWidth: 300 }}>
-                {list.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
+                {groups.map((g) => (
+                  <optgroup key={g} label={g}>
+                    {list
+                      .filter((s) => s.category === g)
+                      .map((s) => (
+                        <option key={s.id} value={s.id} disabled={!!s.error}>
+                          {s.name}
+                          {s.error ? " (didn't load)" : ""}
+                        </option>
+                      ))}
+                  </optgroup>
                 ))}
               </select>
             </label>
@@ -336,8 +371,18 @@ export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
             </p>
           )}
           <p className="small">
-            Add your own: copy <code>strategies/my_strategy.py</code>. <a href={ADD_YOUR_OWN}>How</a>
+            Add your own: copy <code>strategies/my_strategy.py</code>, or{" "}
+            <label className="link" style={{ cursor: "pointer" }}>
+              add a .py file
+              <input type="file" accept=".py" hidden onChange={(e) => {
+                  addFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            . <a href={ADD_YOUR_OWN}>How</a>
           </p>
+          {added && <p className="small">{added}</p>}
         </>
       ) : (
         <>

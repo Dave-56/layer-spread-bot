@@ -32,15 +32,6 @@ export function when(iso: string | null | undefined): string | null {
   });
 }
 
-// Layer's rule-difference codes, in words.
-export const CAVEAT: Record<string, string> = {
-  source_differs: "different data source",
-  timing_differs: "different deadline or timing",
-  rounding_differs: "different rounding",
-  carveout_differs: "different special exceptions",
-  definition_differs: "a term is defined differently",
-};
-
 export const SKIP: Record<string, string> = {
   switched_off: "venue switched off in this release",
   no_key: "no key for this venue",
