@@ -1,0 +1,33 @@
+{
+  "name": "layer-spread-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example bot on the uselayer SDK: best venue and cross-venue arbitrage, run on your machine with your own keys.",
+  "scripts": {
+    "setup": "npm install && cd engine && uv sync",
+    "dev": "concurrently --kill-others --names engine,web --prefix-colors blue,green \"npm:dev:engine\" \"npm:dev:web\"",
+    "dev:engine": "cd engine && uv run uvicorn spread_engine.app:app --host 127.0.0.1 --port 8765 --no-access-log",
+    "dev:web": "next dev --hostname 127.0.0.1 --port 3200",
+    "build": "next build",
+    "lint": "eslint",
+    "test": "vitest run && cd engine && uv run pytest -q",
+    "smoke": "cd engine && uv run python scripts/smoke.py"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "typescript": "^5",
+    "vitest": "^5.0.2"
+  }
+}

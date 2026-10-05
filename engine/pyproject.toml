@@ -1,0 +1,30 @@
+[project]
+name = "spread-engine"
+version = "0.1.0"
+description = "The bot's local engine: a small HTTP service on your machine that runs the uselayer SDK with your own keys."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "python-dotenv>=1.0",
+  # Pinned to uselayer-sdk PR #35 (return per day on quote()), which sits on main with
+  # buy_best/preview_best (#33), the gross spread (#32) and fresh books (#34). Switch to
+  # "uselayer>=<next release>" once that release is on PyPI.
+  "uselayer @ git+https://github.com/Dave-56/uselayer-sdk@bd69053634e7686913f599204ee37252adb83798#subdirectory=python",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["spread_engine"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
