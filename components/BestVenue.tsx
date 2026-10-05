@@ -633,7 +633,7 @@ function StrategyMode() {
   );
 }
 
-interface Game {
+export interface Game {
   key: string;
   title: string;
   time: string | null;
@@ -641,7 +641,7 @@ interface Game {
 }
 
 /** Matches grouped into games by the engine's event_key: one match is one outcome of one game. */
-function gamesOf(found: MatchView[]): Game[] {
+export function gamesOf(found: MatchView[]): Game[] {
   const games: Game[] = [];
   for (const m of found) {
     const key = m.event_key ?? m.id;

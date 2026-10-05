@@ -10,6 +10,8 @@ import {
   type MatchView,
   type QuoteLeg,
   type QuoteView,
+  type RecordGame,
+  type Recording,
   type ReplayFile,
   type ReplayMoment,
   type ReplayResult,
@@ -17,9 +19,11 @@ import {
   type ScanRow,
   type TradeResult,
 } from "@/lib/engine";
+import { gamesOf } from "./BestVenue";
 import { cents, count, money, pct, side, when } from "./format";
 import { DROPS, lasted, replayHeadline, said, scanHeadline, tradeLine } from "./gaps";
 import { traded } from "./PaperAccount";
+import { LENGTHS, savedLine, savingLine } from "./saving";
 
 // Job 2: scan matched markets for the same bet priced differently on the two venues. The answer
 // comes first (how many gaps are still money after fees, or why none is), then each surviving gap
@@ -342,6 +346,175 @@ function fileLabel(f: ReplayFile): string {
   return `${f.match ? (f.match.outcome ?? f.match.title) : f.file} · ${span(f.from, f.to)}`;
 }
 
+
+const POLL_MS = 1000;
+
+/** Save prices: pick a matched game (on now first), how long, and the engine records both venues'
+ * books in the background with the SDK's record_stream. Progress shows here; Stop keeps what's written. */
+function SavePrices({ onSaved }: { onSaved: (path: string) => void }) {
+  const [found, setFound] = useState<RecordGame[] | null>(null);
+  const [game, setGame] = useState("");
+  const [mid, setMid] = useState("");
+  const [minutes, setMinutes] = useState(30);
+  const [rec, setRec] = useState<Recording | null>(null);
+  const [polled, setPolled] = useState(0); // when rec was read, for the countdown between polls
+  const [tick, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const seen = useRef<string | null>(null); // the recording whose end was already handed to Saved prices
+
+  function show(r: Recording | null) {
+    setRec(r);
+    setPolled(Date.now());
+    setTick(Date.now());
+    if (r && r.state !== "recording" && r.path && seen.current !== r.started_at) {
+      seen.current = r.started_at;
+      onSaved(r.path);
+    }
+  }
+
+  useEffect(() => {
+    // A late answer must not undo a game picked since (React runs this twice in development).
+    let gone = false;
+    fetch("/engine/record/games")
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(errorText(body, r.status));
+        if (gone) return;
+        const ms = (body as { matches: RecordGame[] }).matches;
+        setFound(ms);
+        setGame(ms[0] ? (ms[0].event_key ?? ms[0].id) : "");
+        setMid(ms[0]?.id ?? "");
+      })
+      .catch((e) => !gone && setError(e instanceof Error ? e.message : String(e)));
+    // A recording started before this page opened is picked up where it is; one that already ended isn't announced again.
+    fetch("/engine/record/status")
+      .then((r) => r.json())
+      .then((b: { recording: Recording | null }) => {
+        if (gone) return;
+        if (b.recording?.state === "recording") show(b.recording);
+        else seen.current = b.recording?.started_at ?? null;
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const running = rec?.state === "recording";
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => {
+      setTick(Date.now());
+      fetch("/engine/record/status")
+        .then((r) => r.json())
+        .then((b: { recording: Recording | null }) => show(b.recording))
+        .catch(() => {});
+    }, POLL_MS);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  async function post(path: string, body: unknown) {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const b = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(errorText(b, r.status));
+      show((b as { recording: Recording | null }).recording);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  }
+
+  const games = gamesOf(found ?? []);
+  const onNow = (g: (typeof games)[number]) => !!(g.outcomes[0] as RecordGame).on_now;
+  const current = games.find((g) => g.key === game);
+  const option = (g: (typeof games)[number]) => (
+    <option key={g.key} value={g.key}>
+      {g.title}
+      {!onNow(g) && when(g.time) ? ` · ${when(g.time)}` : ""}
+    </option>
+  );
+  const left = rec ? rec.seconds_left - (tick - polled) / 1000 : 0;
+  const done = rec ? savedLine(rec) : null;
+
+  return (
+    <div className="box save-prices">
+      <div className="label">Save prices</div>
+      {running && rec ? (
+        <>
+          <div className="status">
+            <span className="dot" /> Saving prices: {rec.match.outcome ?? rec.match.title} · {rec.match.title}
+          </div>
+          <div className="row">
+            <span>{savingLine(rec, left)}</span>
+            <button className="btn quiet" onClick={() => post("/engine/record/stop", {})} disabled={busy}>
+              Stop
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {found === null && !error && (
+            <div className="status">
+              <span className="dot" /> Loading games
+            </div>
+          )}
+          {found && !games.length && <p className="small muted">No game is open on both venues right now.</p>}
+          {current && (
+            <div className="controls run">
+              <label className="field grow">
+                Game
+                <select
+                  value={game}
+                  onChange={(e) => {
+                    setGame(e.target.value);
+                    setMid(games.find((g) => g.key === e.target.value)?.outcomes[0]?.id ?? "");
+                  }}
+                >
+                  {games.some(onNow) && <optgroup label="On now">{games.filter(onNow).map(option)}</optgroup>}
+                  {games.some((g) => !onNow(g)) && <optgroup label="Later">{games.filter((g) => !onNow(g)).map(option)}</optgroup>}
+                </select>
+              </label>
+              {current.outcomes.length > 1 && (
+                <label className="field">
+                  Outcome
+                  <select value={mid} onChange={(e) => setMid(e.target.value)}>
+                    {current.outcomes.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.outcome ?? m.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="field">
+                For
+                <select value={minutes} onChange={(e) => setMinutes(+e.target.value)}>
+                  {LENGTHS.map((l) => (
+                    <option key={l.minutes} value={l.minutes}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="btn" onClick={() => post("/engine/record/start", { match_id: mid, minutes })} disabled={busy || !mid}>
+                {busy ? "Starting…" : "Save prices"}
+              </button>
+            </div>
+          )}
+          {done && <p className={rec?.state === "failed" ? "error" : "small"}>{done}</p>}
+        </>
+      )}
+      {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
 function Replay() {
   const [files, setFiles] = useState<ReplayFile[] | null>(null);
   const [folder, setFolder] = useState("");
@@ -352,7 +525,7 @@ function Replay() {
   const [cant, setCant] = useState<string | null>(null);
   const [res, setRes] = useState<ReplayResult | null>(null);
 
-  function load(dir: string) {
+  function load(dir: string, pick?: string) {
     fetch(`/engine/replay/files${dir.trim() ? `?dir=${encodeURIComponent(dir.trim())}` : ""}`)
       .then(async (r) => {
         const body = await r.json().catch(() => null);
@@ -360,7 +533,7 @@ function Replay() {
         const list = (body as { files: ReplayFile[] }).files;
         setError(null);
         setFiles(list);
-        setFile(list.find((f) => !f.error)?.path ?? "");
+        setFile(list.find((f) => !f.error && f.path === pick)?.path ?? list.find((f) => !f.error)?.path ?? "");
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }
@@ -392,6 +565,15 @@ function Replay() {
   const usable = (files ?? []).filter((f) => !f.error);
   return (
     <>
+      <p className="lead">Replay re-runs prices you saved from a live game, moment by moment, to show whether a gap would have made money after fees.</p>
+      {files && !usable.length && <p className="lead">No saved prices yet. Pick a game that&apos;s on now and press Save prices.</p>}
+      <SavePrices
+        onSaved={(path) => {
+          setRes(null);
+          setCant(null);
+          load(folder, path);
+        }}
+      />
       <div className="controls run">
         {usable.length > 0 && (
           <label className="field grow">
@@ -424,11 +606,6 @@ function Replay() {
           </div>
         </details>
       </div>
-      {files && !usable.length && (
-        <p className="lead">
-          No saved prices on this computer yet: save some with <code>npm run record -- &lt;kalshi ticker&gt;</code>.
-        </p>
-      )}
       {error && <p className="error">{error}</p>}
       {cant && <h2 className="headline none">{cant}</h2>}
       {res && <ReplayAnswer res={res} />}
