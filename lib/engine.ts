@@ -186,6 +186,42 @@ export type ScanEvent =
   | { type: "done"; total: number; counts: Record<Verdict, number>; finished_skipped?: number }
   | { type: "error"; error: EngineError };
 
+// Replay: a pair the user recorded with the SDK (npm run record), run through the same scan.
+export interface ReplayFile {
+  path: string;
+  file: string;
+  bytes?: number;
+  events?: number;
+  from?: string | null;
+  to?: string | null;
+  markets?: Record<string, string[]>;
+  top_of_book_only?: boolean;
+  size_unknown?: boolean;
+  match?: MatchView | null;
+  error?: string;
+}
+
+export interface ReplayMoment extends Omit<ScanRow, "type"> {
+  at: string;
+}
+
+export interface ReplayResult {
+  path: string;
+  file: string;
+  from: string | null;
+  to: string | null;
+  top_of_book_only: boolean;
+  size_unknown: boolean;
+  match: MatchView;
+  settles_at: string | null;
+  moments: number;
+  counts: Record<Verdict, number>;
+  best: ReplayMoment | null;
+  best_survivor: ReplayMoment | null;
+  survivor_seconds: number;
+  longest_survivor_s: number;
+}
+
 export interface TradeResult {
   mode: string;
   status: "hedged" | "missed" | "unwound" | "exposed";

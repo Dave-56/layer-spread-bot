@@ -11,7 +11,8 @@
     "build": "next build",
     "lint": "eslint",
     "test": "vitest run && cd engine && uv run pytest -q",
-    "smoke": "cd engine && uv run python scripts/smoke.py"
+    "smoke": "cd engine && uv run python scripts/smoke.py",
+    "record": "cd engine && uv run python scripts/record.py"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
