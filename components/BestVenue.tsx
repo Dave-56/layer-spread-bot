@@ -3,8 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   errorText,
+  ndjson,
   VENUE_NAME,
   type BestResult,
+  type EveryEvent,
+  type EveryOutcome,
+  type EveryRow,
   type BestVenue as Why,
   type CompareView,
   type MatchView,
@@ -13,7 +17,19 @@ import {
   type StrategyList,
 } from "@/lib/engine";
 import { cents, count, money, side, skipText, UNKNOWN_SKIPS, when } from "./format";
-import { alreadyExists, bestHeadline, DEFAULT_HOW, HOW, matchNote, strategyNoTrade, type How } from "./headlines";
+import {
+  alreadyExists,
+  bestHeadline,
+  DEFAULT_HOW,
+  everyCell,
+  everyOrder,
+  everySummary,
+  HOW,
+  matchNote,
+  skipLine,
+  strategyNoTrade,
+  type How,
+} from "./headlines";
 
 // Job 1: you (or your strategy) already know the trade. The bot prices that exact order on both
 // venues, after fees and depth, and shows where it's cheaper for that size.
@@ -23,7 +39,6 @@ import { alreadyExists, bestHeadline, DEFAULT_HOW, HOW, matchNote, strategyNoTra
 // Every number and label is the engine's (BestResult.compare); nothing is computed here.
 
 const ADD = "__add__"; // the dropdown's last option: add your own .py
-const upper = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ---- Used by the chat panel and the Arbitrage tab ------------------------------------------------
 
@@ -152,7 +167,7 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
                 ) : (
                   <>
                     <div className="venue-chance">—</div>
-                    <div className="small muted">{upper(v.skip_reason ?? `${v.venue_name} can't take this order.`)}</div>
+                    <div className="small muted">{skipLine(v)}</div>
                   </>
                 ))}
               {url && (
@@ -190,7 +205,7 @@ function Numbers({ c }: { c: CompareView }) {
           <tr key={v.venue} className={v.cheaper ? "chosen" : undefined}>
             <td>
               {v.venue_name}
-              {!v.ok && v.skip_reason && <div className="small muted">{v.skip_reason}</div>}
+              {!v.ok && <div className="small muted">{skipLine(v)}</div>}
             </td>
             <td className="num">{v.avg_price_label ?? "—"}</td>
             <td className="num">{money(v.fees)}</td>
@@ -748,6 +763,167 @@ function ManualMode() {
   );
 }
 
+// ---- Every market: the next markets in a category, each compared, biggest saving first ------------
+
+// Layer's categories, named as the strategy picker names them (engine/spread_engine/every_market.py).
+const EVERY_CATEGORIES = [
+  { id: "sports", name: "Sports" },
+  { id: "news", name: "News, politics & economics" },
+  { id: "crypto", name: "Crypto" },
+] as const;
+const EVERY_LIMIT = 25;
+const EVERY_SIZE = 100;
+
+interface EveryScan {
+  total: number | null; // null until the engine has listed the markets
+  rows: EveryRow[];
+  empty: string | null;
+  counts: Record<EveryOutcome, number> | null; // set when it's done
+}
+
+/** One venue's price for the row: the chance it gives YES, with the price in cents. */
+function EveryPrice({ r, venue }: { r: EveryRow; venue: "kalshi" | "polymarket_us" }) {
+  const v = r.best.compare?.venues.find((x) => x.venue === venue);
+  return (
+    <span className={`every-price ${v?.cheaper ? "cheaper" : ""} ${v && !v.ok ? "out" : ""}`} data-venue={VENUE_NAME[venue]}>
+      {v?.chance_label ?? "—"}
+      {v?.price_label && <span className="small muted"> · {v.price_label}</span>}
+    </span>
+  );
+}
+
+function EveryMarketMode() {
+  const t = useTrade();
+  const [category, setCategory] = useState<string>("sports");
+  const [scan, setScan] = useState<EveryScan | null>(null);
+  const [running, setRunning] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const stop = useRef<AbortController | null>(null);
+
+  useEffect(() => () => stop.current?.abort(), []); // leaving the page stops the scan
+
+  async function run() {
+    stop.current?.abort();
+    const ctl = new AbortController();
+    stop.current = ctl;
+    setRunning(true);
+    setOpen(null);
+    setError(null);
+    setScan({ total: null, rows: [], empty: null, counts: null });
+    try {
+      const r = await fetch("/engine/best/scan", { ...post({ category, limit: EVERY_LIMIT, size: EVERY_SIZE }), signal: ctl.signal });
+      if (!r.ok || !r.body) throw new Error(errorText(await r.json().catch(() => null), r.status));
+      for await (const e of ndjson<EveryEvent>(r.body)) {
+        if (e.type === "start") setScan((s) => s && { ...s, total: e.total, empty: e.empty });
+        else if (e.type === "row") setScan((s) => s && { ...s, rows: [...s.rows, e] });
+        else if (e.type === "done") setScan((s) => s && { ...s, counts: e.counts });
+      }
+    } catch (e) {
+      if (!ctl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+    }
+    if (stop.current === ctl) setRunning(false);
+  }
+
+  function pick(r: EveryRow) {
+    if (open === r.match.id) return setOpen(null);
+    setOpen(r.match.id);
+    t.show({ ...r.order, why: "", match: r.match }, "You picked", r.best);
+  }
+
+  const rows = scan ? [...scan.rows].sort(everyOrder) : [];
+  const name = EVERY_CATEGORIES.find((c) => c.id === category)?.name.toLowerCase();
+  return (
+    <>
+      <div className="controls">
+        <label className="field">
+          Markets
+          <select value={category} onChange={(e) => setCategory(e.target.value)} disabled={running}>
+            {EVERY_CATEGORIES.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="btn big" onClick={run} disabled={running}>
+          {running ? "Checking…" : "Check every market"}
+        </button>
+        {running && (
+          <button className="link" onClick={() => stop.current?.abort()}>
+            Stop
+          </button>
+        )}
+      </div>
+      <p className="small muted hint">
+        The next {EVERY_LIMIT} markets on both venues, soonest first: where {EVERY_SIZE} YES costs less, after fees.
+      </p>
+
+      {scan && running && (
+        <div className="status">
+          <span className="dot" />
+          {scan.total == null
+            ? `Finding the next ${EVERY_LIMIT} ${name} markets on both venues`
+            : `Checked ${count(scan.rows.length)} of ${count(scan.total)}`}
+        </div>
+      )}
+      {scan && !running && !scan.counts && !error && scan.total != null && scan.total > 0 && (
+        <p className="small muted">Stopped after {count(scan.rows.length)} of {count(scan.total)}.</p>
+      )}
+      {error && <p className="error">{error}</p>}
+      {scan?.empty && <h2 className="headline none">{scan.empty}</h2>}
+      {scan?.counts && scan.total ? <p className="lead every-summary">{everySummary(scan.counts, scan.total)}</p> : null}
+
+      {rows.length > 0 && (
+        <div className="every" role="list">
+          <div className="every-head" aria-hidden>
+            <span>Market</span>
+            <span>Kalshi</span>
+            <span>Polymarket US</span>
+            <span>
+              Cheaper for {EVERY_SIZE} YES, after fees
+            </span>
+          </div>
+          {rows.map((r) => {
+            const cell = everyCell(r);
+            const t0 = when(r.match.event_time);
+            return (
+              <div key={r.match.id} role="listitem">
+                <button className={`every-row ${open === r.match.id ? "current" : ""}`} aria-expanded={open === r.match.id} onClick={() => pick(r)}>
+                  <span className="every-market">
+                    <span className="every-outcome">{r.match.outcome ?? r.match.title}</span>
+                    <span className="small muted">
+                      {r.match.title}
+                      {t0 ? ` · ${t0}` : ""}
+                    </span>
+                    {r.match.rule_warning && (
+                      <span className="pill warn" title={r.match.rule_warning}>
+                        Worded differently
+                      </span>
+                    )}
+                  </span>
+                  <EveryPrice r={r} venue="kalshi" />
+                  <EveryPrice r={r} venue="polymarket_us" />
+                  <span className={`every-best ${r.outcome}`}>
+                    <span className="every-best-title">{cell.title}</span>
+                    {cell.detail && <span className="small muted">{cell.detail}</span>}
+                  </span>
+                </button>
+                {open === r.match.id && (
+                  <>
+                    <TradeResult t={t} />
+                    {t.error && <p className="error">{t.error}</p>}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function BestVenue() {
   const [how, setHow] = useState<How>(DEFAULT_HOW);
   return (
@@ -762,12 +938,15 @@ export default function BestVenue() {
           </button>
         ))}
       </div>
-      {/* Both stay mounted, each with its own trade: switching never shows the other mode's result. */}
+      {/* Each stays mounted, with its own trade: switching never shows another mode's result. */}
       <div hidden={how !== "manual"}>
         <ManualMode />
       </div>
       <div hidden={how !== "strategy"}>
         <StrategyMode />
+      </div>
+      <div hidden={how !== "every"}>
+        <EveryMarketMode />
       </div>
     </section>
   );

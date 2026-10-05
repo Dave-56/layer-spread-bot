@@ -399,3 +399,12 @@ def test_layer_is_asked_for_small_pages() -> None:
     from spread_engine.app import page_size
 
     assert (page_size(30), page_size(50), page_size(10), page_size(100), page_size(500)) == (60, 100, 40, 200, 200)
+
+
+def test_every_market_counts_a_venue_that_didnt_answer_as_couldnt_check() -> None:
+    from spread_engine import every_market
+
+    best = {"ok": True, "why": {"reason_code": "only_venue", "venue": "kalshi"}, "compare": {"unavailable": ["Polymarket US"]}}
+    assert every_market.outcome(best) == "error"
+    best["compare"]["unavailable"] = []
+    assert every_market.outcome(best) == "one_venue"

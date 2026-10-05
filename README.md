@@ -4,7 +4,7 @@ With uselayer, your trading bot keeps its own strategy and gains two abilities: 
 
 Spread runs on your machine, with your own keys, across **Kalshi** and **Polymarket US**. It has two screens:
 
-- **Best venue.** You (by hand) or your strategy decide the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it shows which venue is cheaper for that exact order, after fees. It sends nothing.
+- **Best venue.** You (by hand), your strategy, or "Every market" for a whole list decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it shows which venue is cheaper for that exact order, after fees. It sends nothing.
 - **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: the rules differ, a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see gross spread → fees → net → return per day, and you can paper-trade both legs.
 
 An optional chat panel answers the same questions in plain English, with your own LLM key.
@@ -48,7 +48,7 @@ Keys in `.env`:
 
 ## Strategies
 
-The Best venue screen opens on "Pick a game yourself": search for any game or market (blank lists every open game), pick the outcome, YES or NO and contracts (100 to start), and compare. "Run a strategy" is next to it.
+The Best venue screen opens on "Pick a game yourself": search for any game or market (blank lists every open game), pick the outcome, YES or NO and contracts (100 to start), and compare. "Run a strategy" and "Every market" are next to it.
 
 Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the strategy dropdown on the Best venue screen lists every file there, grouped by category.
 
@@ -63,6 +63,8 @@ It comes with examples named the way people trade. They're examples, not advice:
 | News, politics & economics | Nearly decided, last 7 days | Markets closing within 7 days: 100 of the side priced 90¢–97¢, at most 97¢ |
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
+
+"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes about a minute. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market worded differently on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
 
 ### Add your own
 

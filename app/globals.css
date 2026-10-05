@@ -168,6 +168,7 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
 .picker:focus { outline: none; border-color: #a1a1aa; }
 .desc { margin: 6px 0 12px; line-height: 1.5; max-width: 640px; overflow-wrap: anywhere; }
 .desc .error { font-size: inherit; }
+.hint { margin: 0 0 10px; }
 .controls.run { align-items: center; }
 .btn.big { padding: 9px 18px; font-size: 15px; }
 
@@ -208,6 +209,29 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
 .fold[open] summary { margin-bottom: 4px; }
 .chat-feed .headline { font-size: 16px; }
 
+/* Best venue: every market, one row per outcome */
+.every { margin: 8px 0 0; border-top: 1px solid var(--rule); }
+.every-head, .every-row { display: grid; grid-template-columns: minmax(0, 1fr) 104px 104px 190px; gap: 12px; align-items: start; }
+.every-head { font-size: 12.5px; font-weight: 500; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--rule); }
+.every-row {
+  width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--rule); background: var(--paper);
+  padding: 10px; cursor: pointer; font-size: 14px;
+}
+.every-row:hover { background: #fafafa; }
+.every-row.current { background: var(--paper-hover); }
+.every-market { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.every-outcome { font-weight: 500; color: var(--ink); }
+.every-market .pill { margin-top: 2px; }
+.every-price { font-variant-numeric: tabular-nums; font-weight: 500; }
+.every-price.cheaper { color: var(--good); }
+.every-price.out { color: var(--muted); font-weight: 400; }
+.every-best { display: flex; flex-direction: column; gap: 1px; }
+.every-best-title { font-weight: 500; }
+.every-best.kalshi .every-best-title, .every-best.polymarket_us .every-best-title { color: var(--good); }
+.every-best.error .every-best-title, .every-best.neither .every-best-title { color: var(--muted); }
+.every .result { margin: 0 0 8px; padding: 16px 10px 8px; border-top: 0; }
+.every-summary { margin: 4px 0 12px; }
+
 @media (max-width: 1000px) {
   .layout.with-chat { grid-template-columns: minmax(0, 1fr); }
   .chat { position: static; height: 70vh; border-left: 0; border-top: 1px solid var(--rule); }
@@ -234,4 +258,10 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
   .market-venues { gap: 8px; }
   table.t { font-size: 13px; }
   table.t td, table.t th { padding: 6px; }
+  /* Every market: the market on top, then the two prices (each named), then the answer */
+  .every-head { display: none; }
+  .every-row { grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 12px 4px; }
+  .every-market, .every-best { grid-column: 1 / -1; }
+  .every-price::before { content: attr(data-venue); display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+  .every .result { padding: 12px 0 8px; }
 }

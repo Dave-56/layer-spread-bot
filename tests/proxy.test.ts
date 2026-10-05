@@ -59,6 +59,29 @@ describe("engine proxy", () => {
     expect(sent[1].init.headers).toEqual({ "x-spread-proxy": "1" });
   });
 
+  it("guards Every market's scan the same way, and streams it through unchanged", async () => {
+    const scan = { params: Promise.resolve({ path: ["best", "scan"] }) };
+    const body = JSON.stringify({ category: "sports", limit: 25, size: 100 });
+    const at = (headers: Record<string, string>) => new Request("http://127.0.0.1:3200/engine/best/scan", { method: "POST", headers, body });
+    expect((await POST(at({ host: "127.0.0.1:3200", "sec-fetch-site": "cross-site", "content-type": "application/json" }), scan)).status).toBe(403);
+    expect((await POST(at({ host: "evil.example:3200", "sec-fetch-site": "same-origin", "content-type": "application/json" }), scan)).status).toBe(403);
+    expect((await POST(at({ host: "127.0.0.1:3200" }), scan)).status).toBe(403);
+    expect(sent).toEqual([]);
+
+    const lines = '{"type":"start","total":1}\n{"type":"done","total":1}\n';
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      sent.push({ url, init });
+      return new Response(lines, { status: 200, headers: { "content-type": "application/x-ndjson" } });
+    });
+    const ok = await POST(at({ host: "127.0.0.1:3200", "sec-fetch-site": "same-origin", "content-type": "application/json" }), scan);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("application/x-ndjson");
+    expect(await ok.text()).toBe(lines);
+    expect(sent[0].url).toMatch(/\/best\/scan$/);
+    expect(sent[0].init.headers).toEqual({ "x-spread-proxy": "1", "content-type": "application/json" });
+    expect(sent[0].init.body).toBe(body);
+  });
+
   it("lets this app's own page read", async () => {
     for (const host of ["127.0.0.1:3200", "localhost:3200", "[::1]:3200"]) {
       expect(refuse(req("GET", { host }))).toBeNull();

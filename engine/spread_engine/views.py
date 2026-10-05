@@ -173,7 +173,7 @@ def busy_sentence(venues: Any, *, prices: bool = False) -> str:
 # ---- Best venue: the comparison as the app shows it -------------------------------------------
 
 # The SDK's skip codes (uselayer.best) as one sentence each, for the codes skip_sentence() doesn't word
-# with the book's own numbers. {n} is the venue's name.
+# with the book's own numbers. {n} is the venue's name, {side} YES or NO, {size} the contracts.
 SKIP = {
     "switched_off": "This release doesn't trade on {n}.",
     "no_key": "Add your {n} key to .env to price it here.",
@@ -182,15 +182,27 @@ SKIP = {
     "market_closed": "This market is closed on {n}.",
     "no_book": "There's no book for this market on {n}.",
     "stale_book": "{n}'s prices are too old to use right now. Try again in a few seconds.",
-    "no_offers": "Nobody is selling on {n} right now.",
-    "above_max_price": "{n}'s cheapest offer is above your limit.",
-    "below_min_price": "{n}'s best bid is below your minimum.",
-    "not_enough_size": "{n} doesn't have enough for sale within your limit.",
+    "no_offers": "Nobody is selling {side} on {n} right now.",
+    "above_max_price": "{n}'s cheapest {side} costs more than your max price.",
+    "below_min_price": "{n}'s best bid is below your min price.",
+    "not_enough_size": "{n} doesn't have {size} {side} for sale near its best price.",
     "invalid_order": "This order breaks {n}'s price step or minimum size.",
     "not_held": "You don't hold enough of this on {n} to sell it.",
     "unavailable": "{n} didn't answer just now. Try again in a few seconds.",
 }
 UNKNOWN_SKIPS = frozenset({"unavailable", "stale_book"})  # the venue's price isn't known
+
+
+def skip_line(v: Any, limit: float | None = None) -> str | None:
+    """Why a venue can't take the order, as one plain sentence (:func:`skip_sentence`)."""
+    return skip_sentence(v, limit)
+
+
+def error_line(e: Exception) -> str:
+    """A comparison that couldn't run, as one plain sentence."""
+    if isinstance(e, VenueError):
+        return plain_error(e)
+    return "Couldn't read the prices for this one. Try again in a few seconds."
 
 
 def _num(x: float) -> str:
@@ -261,7 +273,7 @@ def skip_sentence(v: Any, limit: float | None = None) -> str | None:
         if buy:
             return f"{n} doesn't have {_size(v.size)} {side} for sale at {cap} or less."
         return f"{n} isn't buying {_size(v.size)} {side} at {cap} or more."
-    return SKIP.get(code, "").format(n=n) or f"{n} can't take this order."
+    return SKIP.get(code, "").format(n=n, side=side, size=_size(v.size)) or f"{n} can't take this order."
 
 
 def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[str, Any]:
@@ -273,6 +285,7 @@ def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[s
         "cheaper": v.venue == chosen,
         "skip": v.skip,
         "skip_reason": skip_sentence(v, limit),
+        "skip_line": skip_sentence(v, limit),  # the same sentence (Every market's name for it)
         # The venue didn't answer (busy, down, a book too old): its price isn't known. Not "can't fill".
         "unavailable": v.skip in UNKNOWN_SKIPS,
         "price": v.best_price,

@@ -2,7 +2,7 @@
 // uselayer SDK, named in engine/spread_engine/views.py); these functions pick and word them, they
 // never compute a price or a fee.
 
-import type { CompareView, VenueRow } from "@/lib/engine";
+import type { CompareView, EveryOutcome, EveryRow, VenueRow } from "@/lib/engine";
 import { count, money, side } from "./format";
 
 export interface Headline {
@@ -12,20 +12,24 @@ export interface Headline {
   retry?: boolean;
 }
 
-// Best venue's two ways in, in the order shown. The first is the default view.
+// Best venue's ways in, in the order shown. The first is the default view.
 export const HOW = [
   { id: "manual", label: "Pick a game yourself" },
   { id: "strategy", label: "Run a strategy" },
+  { id: "every", label: "Every market" },
 ] as const;
 export type How = (typeof HOW)[number]["id"];
 export const DEFAULT_HOW: How = HOW[0].id;
 
 const sentence = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
-/** Why a venue can't take the order: the engine's sentence, e.g. "This market is closed on Kalshi." */
+/** Why a venue can't take the order: the engine's plain sentence, e.g. "This market is closed on Kalshi." */
 export function skipLine(v: VenueRow): string {
-  return sentence(v.skip_reason ?? `${v.venue_name} can't take this order`);
+  return sentence(v.skip_line ?? v.skip_reason ?? `${v.venue_name} can't take this order`);
 }
+
+/** The engine's saving label, or "less than 1¢" when it rounds to nothing. */
+const savingWords = (c: CompareView) => (c.saving != null && c.saving < 0.005 ? "less than 1¢" : (c.saving_label ?? money(c.saving)));
 
 /**
  * Where to buy and why: "Buy on Polymarket US: $1.80 cheaper for 100 YES, after fees".
@@ -54,9 +58,8 @@ export function bestHeadline(c: CompareView, reasonCode?: string | null): Headli
     };
   if (reasonCode === "tie_first_listed")
     return { title: `Buy on ${name}: same price on both venues for ${order}`, detail: `${money(chosen.total_cost)} on each, fees included.` };
-  const by = c.saving != null && c.saving < 0.005 ? "less than 1¢" : (c.saving_label ?? money(c.saving));
   return {
-    title: `Buy on ${name}: ${by} cheaper for ${order}, after fees`,
+    title: `Buy on ${name}: ${savingWords(c)} cheaper for ${order}, after fees`,
     detail: `${money(chosen.total_cost)} vs ${money(other.total_cost)} on ${other.venue_name}, fees included.`,
   };
 }
@@ -75,6 +78,42 @@ export function strategyNoTrade(r: { started?: number; looked?: { reason: string
   const worded = looked.filter((m) => m.reason === "rules differ").length;
   if (worded === looked.length) return `Kalshi and Polymarket US word all ${worded} of these bets differently.`;
   return "Nothing fit this strategy's rules. Compare one below yourself.";
+}
+
+// ---- Every market ---------------------------------------------------------------------------------
+
+/** One row's answer, for the "Cheaper for 100 YES, after fees" column: who, then by how much or why not. */
+export function everyCell(r: EveryRow): Headline {
+  const c = r.best.compare;
+  if (r.outcome === "error" || !c) {
+    // A venue that didn't answer: say which and why, never "only the other venue".
+    const why = c?.unavailable?.length ? c.venues.filter((v) => v.unavailable).map(skipLine).join(" ") : null;
+    return { title: "Couldn't check", detail: why || r.best.error_line || "Couldn't read the prices for this one." };
+  }
+  const skipped = c.venues.filter((v) => !v.ok).map(skipLine).join(" ");
+  if (r.outcome === "kalshi" || r.outcome === "polymarket_us") return { title: c.cheaper_name ?? "", detail: `${savingWords(c)} cheaper` };
+  if (r.outcome === "same") return { title: "Same price", detail: `${money(c.venues.find((v) => v.cheaper)?.total_cost)} on each` };
+  if (r.outcome === "one_venue") return { title: `Only ${c.cheaper_name}`, detail: skipped };
+  return { title: "Neither venue", detail: skipped };
+}
+
+const RANK: Record<EveryOutcome, number> = { kalshi: 0, polymarket_us: 0, same: 1, one_venue: 2, neither: 3, error: 4 };
+
+/** Biggest saving first; then same price, one venue only, neither, and the ones that couldn't be checked. */
+export function everyOrder(a: EveryRow, b: EveryRow): number {
+  return RANK[a.outcome] - RANK[b.outcome] || (b.best.compare?.saving ?? 0) - (a.best.compare?.saving ?? 0);
+}
+
+/** The scan in one sentence, from the engine's counts. */
+export function everySummary(counts: Record<EveryOutcome, number>, total: number): string {
+  const parts: string[] = [];
+  if (counts.kalshi) parts.push(`Kalshi is cheaper on ${count(counts.kalshi)}`);
+  if (counts.polymarket_us) parts.push(`Polymarket US ${parts.length ? "" : "is cheaper "}on ${count(counts.polymarket_us)}`);
+  if (counts.same) parts.push(`${parts.length ? "same" : "Same"} price on ${count(counts.same)}`);
+  const notBoth = counts.one_venue + counts.neither + counts.error;
+  if (!parts.length) return `Checked ${count(total)} markets. None could be priced on both venues.`;
+  const rest = notBoth ? ` ${count(notBoth)} couldn't be priced on both venues.` : "";
+  return `Checked ${count(total)} markets. ${parts.join(", ")}.${rest}`;
 }
 
 /** "There's already a momentum.py. Replace it, or pick another name." → offer Replace. */
