@@ -52,7 +52,7 @@ Your strategy decides the trade; the bot finds the cheaper venue for it. Each st
 
 1. Copy the template: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`
 2. Give it a `NAME` and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
-3. Reload the page and pick it. Edits to a strategy apply on the next run.
+3. Reload the page and pick its card. Edits to a strategy apply on the next run.
 
 ```python
 from . import Signal, priced
@@ -66,7 +66,7 @@ def decide(matches, client):
     return None                                    # no trade
 ```
 
-`client` is the uselayer SDK with your keys, so a strategy can read anything: `client.prices(m)`, `client.book(m.kalshi)`. The four examples in the folder (first upcoming match, the favorite, an underdog under 30¢, where the venues disagree) are examples, not advice. "Pick a trade yourself" on the same screen skips the strategy: choose a market, YES or NO, contracts and a max price.
+`client` is the uselayer SDK with your keys, so a strategy can read anything: `client.prices(m)`, `client.book(m.kalshi)`. The four examples in the folder (first upcoming match, the favorite, an underdog under 30¢, where the venues disagree) are examples, not advice. "Pick a game yourself" on the same screen skips the strategy: search a game, pick an outcome, YES or NO and how many contracts (a max price is under Settings).
 
 ## Your keys stay on your machine
 
