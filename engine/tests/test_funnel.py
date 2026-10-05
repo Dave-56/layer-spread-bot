@@ -94,10 +94,10 @@ def test_no_warning_when_worded_the_same_and_every_caveat_named() -> None:
 
 def test_unpriced_is_a_plain_sentence_not_the_sdk_text() -> None:
     r = verdict(VenueError("stale_quote", "The polymarket_us book for x is older than max_quote_age_s.", venue="polymarket_us"))
-    assert (r["verdict"], r["reason"]) == ("unpriced", "Polymarket US's prices didn't refresh in time to compare.")
+    assert (r["verdict"], r["reason"]) == ("unpriced", "Polymarket US's prices are too old to use right now. Try again in a few seconds.")
     r = verdict(VenueError("rate_limited", "429", venue="polymarket_us"))
-    assert r["reason"] == "Polymarket US is getting too many requests right now. Try again in a minute."
-    assert verdict(VenueError("weird_new_code", "x"))["reason"] == "Couldn't read the prices for this one. Try again in a minute."
+    assert r["reason"] == "Polymarket US is busy right now. Try again in a few seconds."
+    assert verdict(VenueError("weird_new_code", "x"))["reason"] == "Couldn't read the prices for this one. Try again in a few seconds."
 
 
 def test_no_offers() -> None:

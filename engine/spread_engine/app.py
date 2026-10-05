@@ -36,8 +36,9 @@ from uselayer.guardrails import order_risk
 
 from . import config, every_market, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
+from .reads import GatewayReads, cached_books
 from .strategies import upcoming
-from .views import compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
+from .views import busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -47,6 +48,18 @@ _matches: dict[str, Match] = {}  # every match seen, by its Kalshi market id
 _client: Client | None = None
 _client_error: dict[str, Any] | None = None
 _lock = threading.Lock()
+
+
+_gateway: GatewayReads | None = None
+
+
+def gateway() -> GatewayReads:
+    """The one Polymarket US transport (reads.py) every SDK client here shares, so one window paces
+    the engine's reads and the arbitrage scan's together."""
+    global _gateway
+    if _gateway is None:
+        _gateway = GatewayReads(fake_busy=None if settings.mode == "paper" else False, keep_open=True)
+    return _gateway
 
 
 def client() -> Client:
@@ -63,6 +76,9 @@ def client() -> Client:
                     # A rule that wants a yes gets a no here: there's no terminal to ask in.
                     on_approval=lambda order, reason: False,
                     on_alert=_alerts.append,
+                    # Polymarket US reads: paced, stopped after a 429, a book reused for a few seconds
+                    # outside orders (reads.py). SPREAD_FAKE_BUSY works in paper mode only.
+                    transport=gateway(),
                 )
                 _client_error = None
             except VenueError as e:
@@ -91,6 +107,7 @@ def scan_client() -> Client:
                 rules={"budget": settings.budget, "max_quote_age_s": SCAN_MAX_AGE_S},
                 store=":memory:",
                 on_alert=lambda e: None,
+                transport=gateway(),  # paced with the engine's own reads (reads.py)
             )
         return _scan_client
 
@@ -173,25 +190,34 @@ def _list_in(
     return out, skipped
 
 
+def page_size(limit: int) -> int:
+    """Matches asked of Layer a page: about twice what's wanted, 40 to 200."""
+    return min(200, max(40, 2 * limit))
+
+
 def _list(
     q: str | None, category: str | None, from_: str | None, to: str | None, limit: int, *, upcoming_only: bool = False
 ) -> tuple[list[Match], int]:
     """``limit`` current matches (not over; with ``upcoming_only``, not started either), and how many
     were skipped as started or over. Layer lists started and finished events too, so this pages on
-    (up to 5 pages of 200) instead of filtering one short page."""
+    (up to 1,000 matches) instead of filtering one short page.
+
+    A page is about twice ``limit``, not Layer's 200: the SDK reads each new event's titles from both
+    venues (one Polymarket US request per event), so a smaller page is fewer venue requests."""
     keep: list[Match] = []
     skipped = 0
-    for page in range(5):
+    size = page_size(limit)
+    for page in range(-(-1000 // size)):
         ms = client().matches(
             venue="polymarket_us", q=q or None, category=category or None, from_=from_ or None, to=to or None,
-            limit=200, offset=page * 200,
+            limit=size, offset=page * size,
         )
         for m in ms:
             if over(m) or (upcoming_only and not upcoming(m)):
                 skipped += 1
             elif len(keep) < limit:
                 keep.append(m)
-        if len(keep) >= limit or len(ms) < 200:
+        if len(keep) >= limit or len(ms) < size:
             break
     return _remember(keep), skipped
 
@@ -311,20 +337,27 @@ def best_signal(strategy: str = "sports_favorite", q: str | None = None, categor
         raise HTTPException(422, str(e)) from e
     cats = (category,) if category else tuple(getattr(mod, "LAYER_CATEGORIES", ()) or ())
     ms, started = _list_in(q, cats or None, limit, upcoming_only=True)
-    sig = mod.decide(ms, client())
-    if not isinstance(sig, strategies.Signal):
-        # No trade: the strategy's sentence, and what it looked at with why each wasn't picked, so any
-        # can be compared by hand.
-        why = sig.why if isinstance(sig, strategies.NoTrade) else None
-        looked = [{**match_view(m), "reason": "rules differ" if m.caveats else "not picked"} for m in ms]
-        return {"signal": None, "no_trade": f"No trade: {why}" if why else None, "matches": len(ms), "started": started, "looked": looked, "best": None}
-    _matches[match_id(sig.match)] = sig.match
-    body = BestBody(match_id=match_id(sig.match), side=sig.side, size=sig.size, max_price=sig.max_price)
-    return {
-        "signal": {**body.model_dump(), "why": sig.why, "match": match_view(sig.match)},
-        "matches": len(ms),
-        "best": _preview(body),
-    }
+    # The strategy's reads, the comparison and the preview share each book read (a few seconds).
+    with cached_books(), strategies.read_failures() as failed:
+        sig = mod.decide(ms, client())
+        if isinstance(sig, strategies.Signal):
+            _matches[match_id(sig.match)] = sig.match
+            body = BestBody(match_id=match_id(sig.match), side=sig.side, size=sig.size, max_price=sig.max_price)
+            return {
+                "signal": {**body.model_dump(), "why": sig.why, "match": match_view(sig.match)},
+                "matches": len(ms),
+                "best": _preview(body),
+            }
+    # No trade: the strategy's sentence, and what it looked at with why each wasn't picked, so any
+    # can be compared by hand. If a venue didn't answer, "no trade" isn't known: say that instead.
+    looked = [{**match_view(m), "reason": "rules differ" if m.caveats else "not picked"} for m in ms]
+    if failed:
+        return {
+            "signal": None, "no_trade": busy_sentence(failed, prices=True), "unavailable": True,
+            "matches": len(ms), "started": started, "looked": looked, "best": None,
+        }
+    why = sig.why if isinstance(sig, strategies.NoTrade) else None
+    return {"signal": None, "no_trade": f"No trade: {why}" if why else None, "matches": len(ms), "started": started, "looked": looked, "best": None}
 
 
 def _price(m: Match, side: str, size: int, max_price: float | None = None) -> dict[str, Any]:
@@ -345,7 +378,8 @@ def _preview(b: BestBody) -> dict[str, Any]:
 
 @app.post("/best/preview")
 def best_preview(b: BestBody) -> dict[str, Any]:
-    return {"match": match_view(_find(b.match_id)), **_preview(b)}
+    with cached_books():  # the comparison's book read is reused by the preview of the chosen order
+        return {"match": match_view(_find(b.match_id)), **_preview(b)}
 
 
 @app.post("/best/buy")
@@ -361,6 +395,13 @@ class EveryMarketBody(BaseModel):
     size: int = Field(default=100, gt=0, le=100_000)
 
 
+def _scan_price(m: Match, side: str, size: int) -> dict[str, Any]:
+    # Each comparison's book read is reused by the preview of its chosen order, and a scan runs in the
+    # background, so it sits through a "too many requests" block rather than skipping markets.
+    with cached_books(wait_out=15.0):
+        return _price(m, side, size)
+
+
 @app.post("/best/scan")
 def best_scan(b: EveryMarketBody) -> StreamingResponse:
     """The next ``limit`` markets in a category (soonest first), each compared on both venues, streamed
@@ -369,7 +410,7 @@ def best_scan(b: EveryMarketBody) -> StreamingResponse:
     ms = every_market.soonest_first(ms)[: b.limit]
 
     def lines() -> Iterator[str]:
-        for event in every_market.scan(ms, _price, category=b.category, size=b.size, started=started):
+        for event in every_market.scan(ms, _scan_price, category=b.category, size=b.size, started=started):
             yield json.dumps(event, default=str) + "\n"
 
     return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"cache-control": "no-store"})
@@ -386,13 +427,22 @@ class ScanBody(BaseModel):
     min_return_per_day_pct: float = Field(default=0.0, ge=0)
 
 
+class _ScanQuotes:
+    """The scan's quotes: a book read in the last 3 s is reused (the scan sends nothing), and a
+    "too many requests" block is waited out (it runs in the background) instead of dropping markets."""
+
+    def quote(self, pair: Any, **kw: Any) -> Any:
+        with cached_books(wait_out=15.0):
+            return scan_client().quote(pair, **kw)
+
+
 @app.post("/arb/scan")
 def arb_scan(b: ScanBody) -> StreamingResponse:
     ms, over_count = _list(b.q, b.category, b.from_, b.to, b.limit)
     s = ScanSettings(size=b.size, min_edge=b.min_edge, min_return_per_day_pct=b.min_return_per_day_pct)
 
     def lines() -> Iterator[str]:
-        for event in scan(ms, scan_client(), s, readers=SCAN_READERS):
+        for event in scan(ms, _ScanQuotes(), s, readers=SCAN_READERS):
             if event["type"] == "done":
                 event["finished_skipped"] = over_count  # events already over, left out before the scan
             yield json.dumps(event, default=str) + "\n"

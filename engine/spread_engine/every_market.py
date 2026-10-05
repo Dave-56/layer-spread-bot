@@ -6,8 +6,10 @@ order after fees and by how much. Every number is the SDK's ``client.preview_bes
 :func:`views.compare_view`, the same as the strategy path. A market Layer says is worded differently is
 priced and shown with its warning, never dropped.
 
-Polymarket US books can take up to ~30 s each (its public book is cached), so the scan is bounded and
-reads :data:`strategies.READERS` at once: more makes Polymarket US answer "too many requests".
+Polymarket US books can take up to ~30 s each (its public book is cached), and Polymarket US allows
+only a few book reads every 10 seconds (``reads.py`` spaces them), so the scan is bounded and reads
+:data:`READERS` at once. A comparison where a venue didn't answer is ``error`` ("couldn't check"),
+never "only the other venue".
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import Any
 
 from uselayer import Match
 
-from .strategies import CRYPTO, NEWS, READERS, SPORTS, closes_at, starts_at
+from .strategies import CRYPTO, NEWS, SPORTS, closes_at, starts_at
 from .views import error_line, error_view, match_id, match_view
 
 
@@ -37,6 +39,7 @@ CATEGORIES = {
     "crypto": Category(CRYPTO, ("crypto",), "crypto"),
 }
 
+READERS = 2  # comparisons at once; reads.py keeps Polymarket US's book reads under its limit
 LISTED = 200  # matches listed per Layer category before the soonest are picked (listing reads no book)
 FAR = datetime.max.replace(tzinfo=UTC)
 
@@ -55,9 +58,9 @@ def empty_line(cat: Category, started: int) -> str:
 
 def outcome(best: dict[str, Any]) -> str:
     """How one comparison came out: ``kalshi`` / ``polymarket_us`` (cheaper), ``same``, ``one_venue``,
-    ``neither`` or ``error``. Read from the SDK's own ``reason_code``."""
-    if not best.get("ok"):
-        return "error"
+    ``neither`` or ``error`` (couldn't check). Read from the SDK's own ``reason_code``."""
+    if not best.get("ok") or (best.get("compare") or {}).get("unavailable"):
+        return "error"  # couldn't check: it errored, or a venue didn't answer
     code = (best.get("why") or {}).get("reason_code")
     if code == "cheaper":
         return best["why"]["venue"]

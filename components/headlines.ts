@@ -8,13 +8,24 @@ import { count, money, side } from "./format";
 export interface Headline {
   title: string;
   detail: string;
+  /** A venue didn't answer: there's no answer yet, only "Try again". */
+  retry?: boolean;
 }
+
+// Best venue's ways in, in the order shown. The first is the default view.
+export const HOW = [
+  { id: "manual", label: "Pick a game yourself" },
+  { id: "strategy", label: "Run a strategy" },
+  { id: "every", label: "Every market" },
+] as const;
+export type How = (typeof HOW)[number]["id"];
+export const DEFAULT_HOW: How = HOW[0].id;
 
 const sentence = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
-/** Why a venue can't take the order, as the engine's plain sentence: "Nobody is selling YES on Kalshi right now." */
+/** Why a venue can't take the order: the engine's plain sentence, e.g. "This market is closed on Kalshi." */
 export function skipLine(v: VenueRow): string {
-  return v.skip_line ?? sentence(`${v.venue_name} can't fill it right now`);
+  return sentence(v.skip_line ?? v.skip_reason ?? `${v.venue_name} can't take this order`);
 }
 
 /** The engine's saving label, or "less than 1¢" when it rounds to nothing. */
@@ -26,6 +37,9 @@ const savingWords = (c: CompareView) => (c.saving != null && c.saving < 0.005 ? 
  */
 export function bestHeadline(c: CompareView, reasonCode?: string | null): Headline {
   const order = `${count(c.size)} ${side(c.side)}`;
+  // A venue that didn't answer isn't a venue that can't fill: there's no comparison yet.
+  if (c.unavailable?.length)
+    return { title: c.verdict, detail: c.venues.filter((v) => v.unavailable).map(skipLine).join(" "), retry: true };
   const skipped = c.venues.filter((v) => !v.ok).map(skipLine).join(" ");
   const chosen = c.venues.find((v) => v.cheaper);
   if (!chosen || !c.cheaper_name)
@@ -71,7 +85,11 @@ export function strategyNoTrade(r: { started?: number; looked?: { reason: string
 /** One row's answer, for the "Cheaper for 100 YES, after fees" column: who, then by how much or why not. */
 export function everyCell(r: EveryRow): Headline {
   const c = r.best.compare;
-  if (r.outcome === "error" || !c) return { title: "Couldn't check", detail: r.best.error_line ?? "Couldn't read the prices for this one." };
+  if (r.outcome === "error" || !c) {
+    // A venue that didn't answer: say which and why, never "only the other venue".
+    const why = c?.unavailable?.length ? c.venues.filter((v) => v.unavailable).map(skipLine).join(" ") : null;
+    return { title: "Couldn't check", detail: why || r.best.error_line || "Couldn't read the prices for this one." };
+  }
   const skipped = c.venues.filter((v) => !v.ok).map(skipLine).join(" ");
   if (r.outcome === "kalshi" || r.outcome === "polymarket_us") return { title: c.cheaper_name ?? "", detail: `${savingWords(c)} cheaper` };
   if (r.outcome === "same") return { title: "Same price", detail: `${money(c.venues.find((v) => v.cheaper)?.total_cost)} on each` };

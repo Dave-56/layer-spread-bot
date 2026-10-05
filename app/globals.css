@@ -43,6 +43,8 @@ code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 }
 .brand { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
 .brand-tag { font-size: 14px; font-weight: 400; color: var(--muted); padding-left: 12px; border-left: 1px solid var(--rule); }
+.quiet-link { text-decoration: none; }
+.quiet-link:hover { text-decoration: underline; }
 .header-actions { display: flex; align-items: center; gap: 14px; font-size: 14px; color: var(--muted); }
 .info { cursor: help; font-size: 15px; }
 .mode { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); }
@@ -55,7 +57,6 @@ code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 
 .intro { font-size: 15px; line-height: 1.65; color: var(--muted); margin: 0 0 28px; max-width: 760px; }
 .tab-lead { font-size: 16px; color: var(--ink); margin: 0 0 16px; }
-.footer { margin-top: 56px; }
 
 /* tabs: quiet gray, current in a light pill (like the docs sidebar) */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin-bottom: 28px; }
@@ -148,28 +149,16 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
 .composer textarea { flex: 1; resize: none; border: 1px solid var(--rule); border-radius: 8px; padding: 7px 10px; font-size: 14px; outline: none; }
 
 /* Best venue: choose a strategy */
-.card-group { margin: 0 0 18px; }
-.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.card {
-  display: flex; flex-direction: column; gap: 4px; text-align: left; border: 1px solid var(--rule); border-radius: 10px;
-  padding: 12px 14px; background: var(--paper); cursor: pointer;
+.picker {
+  border: 1px solid var(--rule); border-radius: 8px; padding: 7px 10px; font-size: 14.5px; background: var(--paper);
+  width: 100%; max-width: 460px; color: var(--ink);
 }
-.card:hover { background: #fafafa; }
-.card.current { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.card:disabled { cursor: default; background: #fafafa; }
-.card-desc.bad { color: var(--bad); }
+.picker:focus { outline: none; border-color: #a1a1aa; }
+.desc { margin: 6px 0 12px; line-height: 1.5; max-width: 640px; overflow-wrap: anywhere; }
+.desc .error { font-size: inherit; }
 .hint { margin: 0 0 10px; }
-.card-name { font-size: 14.5px; font-weight: 500; color: var(--ink); }
-.card-desc { font-size: 13px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
-.card.add { border-style: dashed; cursor: default; gap: 6px; }
-.card.add:hover { background: var(--paper); }
-.card.add .row { margin-top: 4px; }
 .controls.run { align-items: center; }
 .btn.big { padding: 9px 18px; font-size: 15px; }
-.settings summary { cursor: pointer; font-size: 13px; color: var(--muted); width: fit-content; }
-.settings summary:hover { color: var(--ink); }
-.settings[open] { flex-basis: 100%; }
-.settings[open] .field { margin-top: 10px; }
 
 /* Best venue: pick a game yourself */
 .outcomes { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -185,6 +174,7 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
 .kicker { font-size: 13px; color: var(--ink); margin-bottom: 12px; }
 .headline { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.3; margin: 22px 0 4px; }
 .result .lead { margin: 0 0 16px; }
+.row.again { margin-top: 12px; }
 .market { border: 1px solid var(--rule); border-radius: 12px; padding: 16px 18px; }
 .market-event { font-size: 13px; color: var(--muted); }
 .market-outcome { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; margin: 2px 0 14px; }
@@ -261,7 +251,9 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
 }
 @media (max-width: 640px) {
   .header { padding: 12px 16px; }
-  .brand-tag, .venues-label { display: none; }
+  .venues-label { display: none; }
+  .brand { gap: 8px; }
+  .brand-tag { font-size: 12px; padding-left: 8px; }
   .main { padding: 24px 16px 80px; }
   .field, .field.grow { flex: 1 1 100%; }
   .field input.search, .field.grow select, .field select, .field input.wide { width: 100%; min-width: 0; }
@@ -274,7 +266,7 @@ table.t tr.chosen td:first-child { box-shadow: inset 2px 0 0 var(--good); }
   .venue-chance { font-size: 26px; }
   .field.narrow { flex: 1 1 30%; }
   .field.narrow input { width: 100%; }
-  .cards { grid-template-columns: 1fr; }
+  .picker { max-width: none; }
   .market { padding: 14px; }
   .venue-cell { padding: 10px 12px; }
   .market-venues { gap: 8px; }

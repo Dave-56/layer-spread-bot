@@ -84,7 +84,7 @@ def test_the_next_markets_compared_and_streamed(engine, monkeypatch: pytest.Monk
     # A comparison that failed is a row with one plain sentence; the scan goes on.
     f = by[FAILS]
     assert f["outcome"] == "error" and f["best"]["ok"] is False
-    assert f["best"]["error_line"] == "Polymarket US is getting too many requests right now. Try again in a minute."
+    assert f["best"]["error_line"] == "Polymarket US is busy right now. Try again in a few seconds."
 
     assert done == {"type": "done", "total": 3, "counts": {"kalshi": 2, "polymarket_us": 0, "same": 0, "one_venue": 0, "neither": 0, "error": 1}}
 
@@ -121,7 +121,7 @@ def test_skip_reasons_are_plain_sentences() -> None:
         return VenueCost(venue, "m", "yes", "buy", 100, skip=skip, detail="The best ask is 0.98, above max_price 0.97.")
 
     assert skip_line(v("not_enough_size")) == "Polymarket US doesn't have 100 YES for sale near its best price."
-    assert skip_line(v("stale_book")) == "Polymarket US's prices didn't refresh in time to compare."
+    assert skip_line(v("stale_book")) == "Polymarket US's prices are too old to use right now. Try again in a few seconds."
     assert skip_line(v("no_offers", "kalshi")) == "Nobody is selling YES on Kalshi right now."
     assert skip_line(v("above_max_price")) == "Polymarket US's cheapest YES costs more than your max price."
     for code in SKIP:  # every code: one sentence, none of the SDK's setting names

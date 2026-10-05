@@ -32,21 +32,27 @@ export function when(iso: string | null | undefined): string | null {
   });
 }
 
-// The SDK's skip codes in words, the same as the engine's (views.SKIP). Never show the SDK's own
-// detail text ("The best ask is 0.98, above max_price 0.97.").
-export const SKIP: Record<string, string> = {
-  switched_off: "orders here are switched off in this release",
-  no_key: "no key for this venue",
-  not_allowed: "not allowed by your rules",
-  not_found: "market not found",
-  market_closed: "market closed",
-  no_book: "no prices yet",
-  stale_book: "its prices were too old to use; try again in a few seconds",
-  no_offers: "nobody selling",
-  above_max_price: "best price above your max",
-  below_min_price: "best price below your min",
-  not_enough_size: "not enough for sale within your max price",
-  invalid_order: "breaks the market's price step or minimum",
-  not_held: "you don't hold it here",
-  unavailable: "the venue didn't answer; try again",
+// The SDK's skip codes (uselayer.best) as one sentence each, for a comparison the engine didn't word
+// (the chat's raw result). The engine's own sentences (views.py) come first wherever they're there.
+const SKIP: Record<string, (n: string) => string> = {
+  switched_off: (n) => `This release doesn't trade on ${n}.`,
+  no_key: (n) => `Add your ${n} key to .env to price it here.`,
+  not_allowed: (n) => `Your rules don't allow this order on ${n}.`,
+  not_found: (n) => `${n} doesn't know this market.`,
+  market_closed: (n) => `This market is closed on ${n}.`,
+  no_book: (n) => `There's no book for this market on ${n}.`,
+  stale_book: (n) => `${n}'s prices are too old to use right now. Try again in a few seconds.`,
+  no_offers: (n) => `Nobody is selling on ${n} right now.`,
+  above_max_price: (n) => `${n}'s cheapest offer is above your limit.`,
+  below_min_price: (n) => `${n}'s best bid is below your minimum.`,
+  not_enough_size: (n) => `${n} doesn't have enough for sale within your limit.`,
+  invalid_order: (n) => `This order breaks ${n}'s price step or minimum size.`,
+  not_held: (n) => `You don't hold enough of this on ${n} to sell it.`,
+  unavailable: (n) => `${n} didn't answer just now. Try again in a few seconds.`,
 };
+
+/** Why ``venue`` can't take the order, as one plain sentence. Never the SDK's own words. */
+export const skipText = (code: string, venue: string) => (SKIP[code] ?? ((n: string) => `${n} can't take this order.`))(venue);
+
+/** Skip codes that mean the venue didn't answer (its price isn't known), not that it can't fill. */
+export const UNKNOWN_SKIPS = new Set(["unavailable", "stale_book"]);

@@ -38,9 +38,11 @@ export interface MatchView {
 
 export interface EngineError {
   code: string;
-  message: string;
+  message: string; // one plain sentence, e.g. "Polymarket US is busy right now. Try again in a few seconds."
   hint: string | null;
   venue: string | null;
+  unavailable?: boolean; // the venue didn't answer (busy, down): trying again can work
+  detail?: string | null; // the SDK's own words, for logs and the chat's model; never shown
 }
 
 export interface Status {
@@ -134,8 +136,9 @@ export interface VenueRow {
   ok: boolean;
   cheaper: boolean;
   skip: string | null;
-  skip_reason: string | null; // "best price above your max. The best ask is 0.98, above max_price 0.97."
-  skip_line: string | null; // the same as one plain sentence, for the screen: "Nobody is selling YES on Kalshi right now."
+  skip_reason: string | null; // one sentence: "Polymarket US's cheapest offer is 98¢, above your 97¢ limit."
+  skip_line: string | null; // the same sentence (Every market's name for it)
+  unavailable: boolean; // the venue didn't answer (busy, down, a book too old): its price isn't known
   price: number | null; // best ask for the side bought, in dollars
   price_label: string | null; // "54¢"
   chance_label: string | null; // "54%": the chance the market gives that side
@@ -157,6 +160,8 @@ export interface CompareView {
   venues: VenueRow[];
   cheaper: Venue | null;
   cheaper_name: string | null;
+  // Venues that didn't answer, by name. Not empty: there's no comparison yet (cheaper is null), only "try again".
+  unavailable: string[];
   saving: number | null; // dollars, for this size, vs the other venue
   saving_label: string | null; // "$0.97"
   verdict: string; // "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."

@@ -20,13 +20,14 @@ on both venues, after fees and depth, and sends it to the cheaper one (paper unl
 
 from __future__ import annotations
 
+import contextvars
 import importlib
 import pkgutil
 import re
 import sys
 import traceback
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -138,20 +139,40 @@ def price_words(p: float) -> str:
 DEAD_LOW, DEAD_HIGH = 0.01, 0.99
 
 
+# Venues that didn't answer while a strategy read them (busy, down): "no trade" isn't known then.
+_failed: contextvars.ContextVar[set[str] | None] = contextvars.ContextVar("spread_read_failures", default=None)
+DIDNT_ANSWER = frozenset({"rate_limited", "venue_unavailable", "venue_maintenance"})
+
+
+@contextmanager
+def read_failures() -> Iterator[set[str]]:
+    """Collect the venues that didn't answer a read in this block (e.g. ``{"polymarket_us"}``)."""
+    failed: set[str] = set()
+    token = _failed.set(failed)
+    try:
+        yield failed
+    finally:
+        _failed.reset(token)
+
+
+def _note(e: VenueError) -> None:
+    failed = _failed.get()
+    if failed is not None and e.code in DIDNT_ANSWER and e.venue:
+        failed.add(e.venue)
+
+
 def open_on_both(m: Match, client: Client) -> bool:
     """Both venues say the market is open for trading (``client.market(...).open``)."""
     try:
         return all(client.market(x.market_id, venue=x.venue).open for x in (m.kalshi, m.polymarket_us))
-    except VenueError:
+    except VenueError as e:
+        _note(e)
         return False
 
 
 def live_price(ask: float | None) -> bool:
     """A YES ask someone is really quoting: on offer, and above 1¢ and below 99¢."""
     return ask is not None and DEAD_LOW < ask < DEAD_HIGH
-
-
-READERS = 4  # books read at once: a venue's cached book can take up to ~30 s to refresh
 
 
 def priced(
@@ -161,9 +182,10 @@ def priced(
 
     Skips a match that has started, a market either venue says isn't open, and a venue with no real
     YES price (none on offer, or 1¢/99¢). Reads at most ``limit`` matches' prices (each read is both
-    venues' books, a few at once). A match Layer flagged as worded differently (``m.caveats``) is
-    skipped unless ``rules_differ_ok``: then it's yielded too, and the app shows its warning if you
-    pick it.
+    venues' books), one at a time and only when you ask for the next: Polymarket US allows only a
+    few book reads every 10 seconds (see ``reads.py``), so a strategy that finds its trade in the
+    first game reads one. A match Layer flagged as worded differently (``m.caveats``) is skipped
+    unless ``rules_differ_ok``: then it's yielded too, and the app shows its warning if you pick it.
     """
     chosen: list[Match] = []
     for m in matches:
@@ -173,18 +195,14 @@ def priced(
             continue
         if open_on_both(m, client):
             chosen.append(m)
-    pool = ThreadPoolExecutor(max_workers=READERS)
-    try:
-        reads = [pool.submit(client.prices, m) for m in chosen]
-        for m, read in zip(chosen, reads, strict=True):
-            try:
-                p = read.result()
-            except VenueError:
-                continue
-            if live_price(p.a.yes_ask) and live_price(p.b.yes_ask):
-                yield m, p
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)  # a strategy that's found its trade stops reading
+    for m in chosen:
+        try:
+            p = client.prices(m)
+        except VenueError as e:
+            _note(e)
+            continue
+        if live_price(p.a.yes_ask) and live_price(p.b.yes_ask):
+            yield m, p
 
 
 def cheapest(p: Prices, side: str = "yes") -> float | None:

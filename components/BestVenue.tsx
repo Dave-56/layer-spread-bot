@@ -16,24 +16,37 @@ import {
   type StrategyInfo,
   type StrategyList,
 } from "@/lib/engine";
-import { cents, count, money, side, SKIP, when } from "./format";
-import { alreadyExists, bestHeadline, everyCell, everyOrder, everySummary, matchNote, skipLine, strategyNoTrade } from "./headlines";
-import { fetchAccount, traded, type Account } from "./PaperAccount";
+import { cents, count, money, side, skipText, UNKNOWN_SKIPS, when } from "./format";
+import {
+  alreadyExists,
+  bestHeadline,
+  DEFAULT_HOW,
+  everyCell,
+  everyOrder,
+  everySummary,
+  HOW,
+  matchNote,
+  skipLine,
+  strategyNoTrade,
+  type How,
+} from "./headlines";
 
-// Job 1: your strategy already knows the trade. The bot prices that exact order on both venues,
-// after fees and depth, and sends it where it's cheaper for that size.
+// Job 1: you (or your strategy) already know the trade. The bot prices that exact order on both
+// venues, after fees and depth, and shows where it's cheaper for that size.
 //
-// The flow: choose (a template, your own file, or a game by hand) → run → the match, the two
-// venues' markets side by side, and the answer: where to buy, and by how much it's cheaper.
+// The flow: choose (a game by hand, or a strategy) → compare → the match, the two venues' markets
+// side by side, and the answer: where it's cheaper, and by how much. Nothing is sent from here.
 // Every number and label is the engine's (BestResult.compare); nothing is computed here.
 
-const ADD_YOUR_OWN = "https://github.com/Dave-56/layer-spread-bot#add-your-own";
-const YOUR_OWN = "Your own";
+const ADD = "__add__"; // the dropdown's last option: add your own .py
 
 // ---- Used by the chat panel and the Arbitrage tab ------------------------------------------------
 
 /** The SDK's comparison as one sentence, from its own numbers. */
 export function verdictLine(why: Why): string {
+  const unknown = why.venues.filter((v) => v.skip && UNKNOWN_SKIPS.has(v.skip)).map((v) => VENUE_NAME[v.venue] ?? v.venue);
+  if (unknown.length)
+    return `Couldn't get ${unknown.map((n) => `${n}'s`).join(" or ")} ${unknown.length > 1 ? "prices" : "price"} just now, so we can't compare yet.`;
   const chosen = why.venues.find((v) => v.venue === why.venue);
   if (!chosen) return why.reason;
   const other = why.venues.find((v) => v.venue !== why.venue && v.ok);
@@ -47,7 +60,7 @@ export function verdictLine(why: Why): string {
   return `${name} is ${by} cheaper for ${count(why.size)} contracts, fees included: ${money(chosen.all_in)} vs ${money(other.all_in)}.`;
 }
 
-export function CompareTable({ why }: { why: Why }) {
+export function CompareTable({ why, c }: { why: Why; c?: CompareView }) {
   return (
     <table className="t">
       <thead>
@@ -61,13 +74,13 @@ export function CompareTable({ why }: { why: Why }) {
       </thead>
       <tbody>
         {why.venues.map((v) => (
-          <tr key={v.venue} className={v.venue === why.venue ? "chosen" : undefined}>
+          <tr key={v.venue} className={v.venue === (c ? c.cheaper : why.venue) ? "chosen" : undefined}>
             <td>
               {VENUE_NAME[v.venue] ?? v.venue}{" "}
-              {v.venue === why.venue && <span className="pill good">cheaper</span>}
+              {v.venue === (c ? c.cheaper : why.venue) && <span className="pill good">cheaper</span>}
               {v.skip && (
                 <div className="small muted">
-                  Skipped: {SKIP[v.skip] ?? v.skip.replaceAll("_", " ")}
+                  {c?.venues.find((x) => x.venue === v.venue)?.skip_reason ?? skipText(v.skip, VENUE_NAME[v.venue] ?? v.venue)}
                 </div>
               )}
             </td>
@@ -213,7 +226,8 @@ interface Looked extends MatchView {
 
 interface SignalResult {
   signal: Signal | null;
-  no_trade?: string | null; // the strategy's own sentence
+  no_trade?: string | null; // the strategy's own sentence, or the engine's when a venue didn't answer
+  unavailable?: boolean; // a venue didn't answer while the strategy read prices: try again
   matches: number;
   started?: number;
   looked?: Looked[];
@@ -235,44 +249,20 @@ const post = (body: unknown): RequestInit => ({
 
 const orderOf = (t: Signal) => ({ match_id: t.match_id, side: t.side, size: t.size, max_price: t.max_price });
 
-type Busy = null | "run" | "find" | "buy";
+type Busy = null | "run" | "find";
 
-/** One trade being compared and maybe bought. Each mode has its own, so nothing leaks between them. */
+/** One trade being compared. Each mode has its own, so nothing leaks between them. */
 function useTrade() {
   const [trade, setTrade] = useState<(Signal & { picked: string }) | null>(null);
   const [best, setBest] = useState<BestResult | null>(null);
-  const [order, setOrder] = useState<BestResult | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
-  const [acct, setAcct] = useState<Account | null>(null);
 
-  // After the paper account is reset, price the same trade again: the old answer is stale.
-  useEffect(() => {
-    const again = () => {
-      if (!trade) return;
-      setOrder(null);
-      getJson<BestResult>("/engine/best/preview", post(orderOf(trade)))
-        .then(setBest)
-        .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-    };
-    window.addEventListener("spread:reset", again);
-    return () => window.removeEventListener("spread:reset", again);
-  }, [trade]);
-
-  // A budget block is explained with the account's own numbers.
-  const budgetBlocked = best?.preview?.blocked_by === "budget";
-  useEffect(() => {
-    if (budgetBlocked) fetchAccount().then(setAcct).catch(() => setAcct(null));
-  }, [budgetBlocked, best]);
-
-  function start(what: Exclude<Busy, null>) {
-    setBusy(what);
+  function start() {
+    setBusy("run");
     setError(null);
-    if (what === "run") {
-      setOrder(null);
-      setTrade(null);
-      setBest(null);
-    }
+    setTrade(null);
+    setBest(null);
   }
   function fail(e: unknown) {
     setError(e instanceof Error ? e.message : String(e));
@@ -282,7 +272,7 @@ function useTrade() {
     setBest(b);
   }
   async function compare(t: Signal, picked: string) {
-    start("run");
+    start();
     try {
       show(t, picked, await getJson<BestResult>("/engine/best/preview", post(orderOf(t))));
     } catch (e) {
@@ -290,18 +280,9 @@ function useTrade() {
     }
     setBusy(null);
   }
-  async function buy() {
-    if (!trade) return;
-    start("buy");
-    try {
-      setOrder(await getJson<BestResult>("/engine/best/buy", post(orderOf(trade))));
-      traded();
-    } catch (e) {
-      fail(e);
-    }
-    setBusy(null);
-  }
-  return { trade, best, order, busy, error, acct, budgetBlocked, setBusy, start, fail, show, compare, buy };
+  /** The same comparison again, after a venue didn't answer. */
+  const again = () => trade && compare(trade, trade.picked);
+  return { trade, best, busy, error, setBusy, start, fail, show, compare, again };
 }
 
 type Trade = ReturnType<typeof useTrade>;
@@ -315,21 +296,22 @@ function useShowWhenReady(key: unknown) {
   return ref;
 }
 
-/** The match, the two venues' markets, then the answer and the button. Numbers folded below. */
-function TradeResult({ t, mode }: { t: Trade; mode: "paper" | "live" }) {
-  const { trade, best, order, busy, acct, budgetBlocked } = t;
+function TryAgain({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+  return (
+    <div className="row again">
+      <button className="btn" onClick={onClick} disabled={busy}>
+        {busy ? "Checking…" : "Try again"}
+      </button>
+    </div>
+  );
+}
+
+/** The match, the two venues' markets, then the answer. Numbers folded below. Nothing is sent from here. */
+function TradeResult({ t }: { t: Trade }) {
+  const { trade, best, busy } = t;
   const ref = useShowWhenReady(best);
   if (!trade || !best) return null;
   const c = best.ok ? best.compare : undefined;
-  const p = best.preview;
-  const chosen = c?.venues.find((v) => v.cheaper);
-  // What the SDK's guardrails said about the chosen order, before anything is sent.
-  const blocked =
-    p && !p.allowed
-      ? budgetBlocked && acct && chosen?.total_cost != null
-        ? `Your ${acct.mode === "paper" ? "paper " : ""}account already has ${money(acct.at_risk)} in open trades. This ${money(chosen.total_cost)} order would take it over your ${money(acct.budget)} limit.`
-        : [p.rules.decision.reason ?? (p.blocked_by ? `Blocked by ${p.blocked_by}.` : null), ...p.problems].filter(Boolean).join(" ")
-      : null;
   const h = c ? bestHeadline(c, best.why?.reason_code) : null;
   return (
     <div className="result" ref={ref}>
@@ -341,50 +323,21 @@ function TradeResult({ t, mode }: { t: Trade; mode: "paper" | "live" }) {
       <MarketCard m={trade.match} c={c} />
 
       {!best.ok && (
-        <p className="error">
-          {best.error?.message} {best.error?.hint}
-        </p>
+        <>
+          <p className="error">
+            {best.error?.message} {best.error?.hint}
+          </p>
+          {best.error?.unavailable && <TryAgain onClick={t.again} busy={busy !== null} />}
+        </>
       )}
       {h && (
         <>
           <h2 className={`headline ${c?.cheaper ? "" : "none"}`}>{h.title}</h2>
-          <p className="lead">{h.detail}</p>
+          {h.detail && <p className="lead">{h.detail}</p>}
+          {h.retry && <TryAgain onClick={t.again} busy={busy !== null} />}
         </>
       )}
-      {c?.cheaper && blocked && (
-        <div className="box warn">
-          <div className="label">Over your limit</div>
-          {blocked}
-          <div className="small muted">
-            {budgetBlocked
-              ? mode === "paper"
-                ? "Reset the paper account above, or raise your limit in .env."
-                : "Raise your limit in .env, or close trades on the venue."
-              : "Your safety limits are set in .env."}
-          </div>
-        </div>
-      )}
-      {c?.cheaper && !order?.order && (
-        <div className="row">
-          <button className="btn" onClick={t.buy} disabled={busy !== null || blocked !== null}>
-            {busy === "buy"
-              ? "Sending…"
-              : mode === "live"
-                ? `Send LIVE order to ${c.cheaper_name}`
-                : `Paper-trade on ${c.cheaper_name}`}
-          </button>
-          <span className="small muted">
-            {mode === "live" ? "Real money." : "Fake money."} Pays at most {cents(chosen?.limit_price)} a contract.
-          </span>
-        </div>
-      )}
-      {order?.order && (
-        <div className="box good">
-          {order.mode === "live" ? "Bought" : "Paper trade"} on {VENUE_NAME[order.order.venue]}: {count(order.order.filled)} of{" "}
-          {count(order.order.size)} {side(order.order.side)} at {cents(order.order.avg_price)}, fees {money(order.order.fees)}.
-        </div>
-      )}
-      {c && (
+      {c && !h?.retry && (
         <details className="fold">
           <summary>Price, fees and size on each venue</summary>
           <Numbers c={c} />
@@ -407,14 +360,39 @@ function Working({ t, label = "Checking prices on both venues" }: { t: Trade; la
   );
 }
 
-/** Add your own .py: the engine saves it in strategies/, checks it loads, and lists it. */
-function AddYourOwn({ onAdded }: { onAdded: (b: StrategyList & { added: StrategyInfo }) => void }) {
-  const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
+/**
+ * The strategy dropdown: every file in strategies/, grouped by category, and "Add your own (.py)…"
+ * last. Choosing that opens the file picker: the engine saves the file in strategies/, checks it
+ * loads, and it's selected. Cancel goes back to the strategy you had.
+ */
+function StrategyPicker({
+  list,
+  cats,
+  pick,
+  onPick,
+  onAdded,
+}: {
+  list: StrategyInfo[];
+  cats: string[];
+  pick: string;
+  onPick: (id: string) => void;
+  onAdded: (b: StrategyList & { added: StrategyInfo }) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const [replace, setReplace] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
-  // The starter file (my_strategy.py), saved in the browser: edit it, rename it, upload it back.
+  // Closing the file picker without a file goes back to the strategy you had.
+  useEffect(() => {
+    const el = input.current;
+    const cancel = () => setAdding(false);
+    el?.addEventListener("cancel", cancel);
+    return () => el?.removeEventListener("cancel", cancel);
+  }, []);
+
+  // The starter file (my_strategy.py), saved in the browser: edit it, rename it, add it back.
   async function download() {
     try {
       const b = await getJson<{ filename: string; code: string }>("/engine/strategies/starter");
@@ -423,63 +401,102 @@ function AddYourOwn({ onAdded }: { onAdded: (b: StrategyList & { added: Strategy
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setMsg({ text: e instanceof Error ? e.message : String(e), bad: true });
+      setFailed(e instanceof Error ? e.message : String(e));
     }
   }
 
   async function send(file: File | undefined, again = false) {
-    if (!file) return;
-    setBusy(true);
-    setMsg(null);
+    if (input.current) input.current.value = "";
+    if (!file) return setAdding(false);
+    setUploading(true);
+    setFailed(null);
     setReplace(null);
     try {
       const b = await getJson<StrategyList & { added: StrategyInfo }>(
         "/engine/strategies",
         post({ filename: file.name, code: await file.text(), replace: again }),
       );
-      setMsg({ text: `Added ${file.name}: it's now "${b.added.name}" under ${b.added.category}.`, bad: false });
       onAdded(b);
     } catch (e) {
       const text = e instanceof Error ? e.message : String(e);
-      setMsg({ text, bad: true });
+      setFailed(text);
       if (alreadyExists(text)) setReplace(file);
     }
-    setBusy(false);
-    if (input.current) input.current.value = "";
+    setAdding(false);
+    setUploading(false);
   }
 
+  function choose(id: string) {
+    setFailed(null);
+    setReplace(null);
+    if (id === ADD) {
+      setAdding(true);
+      input.current?.click();
+      return;
+    }
+    setAdding(false);
+    onPick(id);
+  }
+
+  const chosen = list.find((s) => s.id === pick);
+  const groups = cats.map((name) => ({ name, items: list.filter((s) => s.category === name) })).filter((g) => g.items.length);
+  const starter = (
+    <button className="link" onClick={download}>
+      starter file
+    </button>
+  );
   return (
-    <div className="card add">
-      <div className="card-name">Add your own</div>
-      <div className="card-desc">
-        One Python file with <code>decide(matches, client)</code>. It returns the trade, or None for no trade.{" "}
-        <a href={ADD_YOUR_OWN}>How</a>
-      </div>
-      <div className="row">
-        <button className="btn quiet" onClick={() => input.current?.click()} disabled={busy}>
-          {busy ? "Uploading…" : "Upload a .py file"}
-        </button>
-        <input ref={input} type="file" accept=".py" hidden onChange={(e) => send(e.target.files?.[0])} />
-        <button className="link" onClick={download}>
-          Download the starter file
-        </button>
-        {replace && (
-          <button className="btn quiet" onClick={() => send(replace, true)} disabled={busy}>
-            Replace it
-          </button>
-        )}
-      </div>
-      {msg && <div className={`small ${msg.bad ? "error" : "muted"}`}>{msg.text}</div>}
-    </div>
+    <>
+      <select
+        className="picker"
+        aria-label="Strategy"
+        value={adding ? ADD : pick}
+        onChange={(e) => choose(e.target.value)}
+        disabled={uploading}
+      >
+        {groups.map((g) => (
+          <optgroup key={g.name} label={g.name}>
+            {g.items.map((s) => (
+              <option key={s.id} value={s.id} disabled={!!s.error} title={s.error ?? undefined}>
+                {s.error ? `${s.name} (didn't load)` : s.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+        <option value={ADD}>Add your own (.py)…</option>
+      </select>
+      <input ref={input} type="file" accept=".py" hidden onChange={(e) => send(e.target.files?.[0])} />
+      {failed ? (
+        <p className="small desc">
+          <span className="error">{failed}</span>{" "}
+          {replace && (
+            <button className="link" onClick={() => send(replace, true)} disabled={uploading}>
+              Replace it
+            </button>
+          )}{" "}
+          <span className="muted">Start from the {starter}.</span>
+        </p>
+      ) : (
+        <p className="small muted desc">
+          {uploading
+            ? "Adding your file…"
+            : adding
+              ? <>One Python file with <code>decide(matches, client)</code>. Start from the {starter}.</>
+              : chosen
+                ? `${chosen.description}${chosen.example ? " An example, not advice." : ""}`
+                : null}
+        </p>
+      )}
+    </>
   );
 }
 
-function StrategyMode({ mode }: { mode: "paper" | "live" }) {
+function StrategyMode() {
   const t = useTrade();
   const [list, setList] = useState<StrategyInfo[] | null>(null);
   const [cats, setCats] = useState<string[]>([]);
   const [pick, setPick] = useState("sports_favorite");
-  const [noTrade, setNoTrade] = useState<string | null>(null);
+  const [noTrade, setNoTrade] = useState<{ text: string; retry: boolean } | null>(null);
   const [looked, setLooked] = useState<Looked[] | null>(null);
   const [allLooked, setAllLooked] = useState(false);
   const { fail } = t;
@@ -500,7 +517,7 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
   }
 
   async function run() {
-    t.start("run");
+    t.start();
     setNoTrade(null);
     setLooked(null);
     setAllLooked(false);
@@ -510,8 +527,8 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
       const r = await getJson<SignalResult>(`/engine/best/signal?${qs}`);
       if (r.signal) t.show(r.signal, "Your strategy picked", r.best);
       else {
-        setNoTrade(r.no_trade ?? `No trade: ${strategyNoTrade(r)}`);
-        setLooked(r.looked ?? []);
+        setNoTrade({ text: r.no_trade ?? `No trade: ${strategyNoTrade(r)}`, retry: !!r.unavailable });
+        setLooked(r.unavailable ? [] : (r.looked ?? []));
       }
     } catch (e) {
       t.fail(e);
@@ -527,44 +544,29 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
   const chosen = list?.find((s) => s.id === pick);
   const runnable = chosen && !chosen.error;
   const shown = looked ? (allLooked ? looked : looked.slice(0, 5)) : [];
-  // The engine's categories, in its order. "Your own" is always shown: it holds the upload card.
-  const groups = cats
-    .map((name) => ({ name, items: (list ?? []).filter((s) => s.category === name) }))
-    .filter((g) => g.items.length || g.name === YOUR_OWN);
   return (
     <>
-      {list && <p className="small muted hint">Examples, not advice.</p>}
-      {groups.map((g) => (
-        <div key={g.name} className="card-group">
-          <div className="label">{g.name}</div>
-          <div className="cards">
-            {g.items.map((s) => (
-              <button
-                key={s.id}
-                aria-pressed={s.id === pick}
-                className={`card ${s.id === pick ? "current" : ""}`}
-                onClick={() => setPick(s.id)}
-                disabled={!!s.error}
-              >
-                <span className="card-name">{s.name}</span>
-                <span className={`card-desc ${s.error ? "bad" : ""}`}>{s.error ? `Didn't load. ${s.error}` : s.description}</span>
-              </button>
-            ))}
-            {g.name === YOUR_OWN && <AddYourOwn onAdded={added} />}
-          </div>
-        </div>
-      ))}
+      {list && (
+        <StrategyPicker
+          list={list}
+          cats={cats}
+          pick={pick}
+          onPick={setPick}
+          onAdded={added}
+        />
+      )}
 
       <div className="controls run">
         <button className="btn big" onClick={run} disabled={t.busy !== null || !runnable}>
-          {t.busy === "run" ? "Running…" : chosen ? `Run “${chosen.name}”` : "Run strategy"}
+          {t.busy === "run" ? "Running…" : "Run"}
         </button>
       </div>
 
       <Working t={t} label="Running the strategy, then checking prices on both venues" />
       {noTrade && (
         <div className="result" ref={noTradeRef}>
-          <h2 className="headline none">{noTrade}</h2>
+          <h2 className="headline none">{noTrade.text}</h2>
+          {noTrade.retry && <TryAgain onClick={run} busy={t.busy !== null} />}
           {shown.length > 0 && (
             <>
               <p className="lead">It looked at these. Compare one yourself:</p>
@@ -605,7 +607,7 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
           )}
         </div>
       )}
-      <TradeResult t={t} mode={mode} />
+      <TradeResult t={t} />
     </>
   );
 }
@@ -629,7 +631,7 @@ function gamesOf(found: MatchView[]): Game[] {
   return games;
 }
 
-function ManualMode({ mode }: { mode: "paper" | "live" }) {
+function ManualMode() {
   const t = useTrade();
   const [q, setQ] = useState("");
   const [found, setFound] = useState<MatchView[] | null>(null);
@@ -638,7 +640,6 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
   const [mid, setMid] = useState("");
   const [mSide, setMSide] = useState<"yes" | "no">("yes");
   const [mSize, setMSize] = useState(100);
-  const [mMax, setMMax] = useState("");
   const { fail } = t;
 
   function showFound(ms: MatchView[], words: string) {
@@ -674,8 +675,7 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
 
   function compare() {
     if (!picked) return;
-    const max = mMax.trim() ? Number(mMax) / 100 : null;
-    t.compare({ match_id: picked.id, side: mSide, size: mSize, max_price: max, why: "", match: picked }, "Your trade");
+    t.compare({ match_id: picked.id, side: mSide, size: mSize, max_price: null, why: "", match: picked }, "Your trade");
   }
 
   return (
@@ -735,7 +735,6 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
               ))}
             </div>
           </div>
-          <RuleNote text={picked?.rule_warning} />
           <div className="controls" style={{ marginTop: 14 }}>
             <div className="field">
               Side
@@ -754,18 +753,11 @@ function ManualMode({ mode }: { mode: "paper" | "live" }) {
             <button className="btn big" onClick={compare} disabled={t.busy !== null || !picked}>
               {t.busy === "run" ? "Comparing…" : "Compare venues"}
             </button>
-            <details className="settings">
-              <summary>Settings</summary>
-              <label className="field">
-                Max price (¢, optional)
-                <input type="number" min={1} max={99} value={mMax} placeholder="none" onChange={(e) => setMMax(e.target.value)} />
-              </label>
-            </details>
           </div>
         </>
       )}
       <Working t={t} />
-      <TradeResult t={t} mode={mode} />
+      <TradeResult t={t} />
     </>
   );
 }
@@ -799,7 +791,7 @@ function EveryPrice({ r, venue }: { r: EveryRow; venue: "kalshi" | "polymarket_u
   );
 }
 
-function EveryMarketMode({ mode }: { mode: "paper" | "live" }) {
+function EveryMarketMode() {
   const t = useTrade();
   const [category, setCategory] = useState<string>("sports");
   const [scan, setScan] = useState<EveryScan | null>(null);
@@ -918,7 +910,7 @@ function EveryMarketMode({ mode }: { mode: "paper" | "live" }) {
                 </button>
                 {open === r.match.id && (
                   <>
-                    <TradeResult t={t} mode={mode} />
+                    <TradeResult t={t} />
                     {t.error && <p className="error">{t.error}</p>}
                   </>
                 )}
@@ -931,43 +923,30 @@ function EveryMarketMode({ mode }: { mode: "paper" | "live" }) {
   );
 }
 
-export default function BestVenue({ mode }: { mode: "paper" | "live" }) {
-  const [how, setHow] = useState<"strategy" | "manual" | "every">("strategy");
-  const [opened, setOpened] = useState<Record<string, boolean>>({});
-  const show = (h: "strategy" | "manual" | "every") => {
-    setHow(h);
-    setOpened((o) => ({ ...o, [h]: true }));
-  };
+export default function BestVenue() {
+  const [how, setHow] = useState<How>(DEFAULT_HOW);
   return (
     <section>
       <p className="tab-lead">
-        Pick a strategy and run it. Spread finds the same market on Kalshi and Polymarket US and buys where it&apos;s cheaper, after fees.
+        Pick a game, or run a strategy. Spread finds the same market on Kalshi and Polymarket US and shows where your order is cheaper, after fees.
       </p>
       <div className="switch" role="tablist">
-        <button className={how === "strategy" ? "current" : ""} onClick={() => show("strategy")}>
-          Run a strategy
-        </button>
-        <button className={how === "manual" ? "current" : ""} onClick={() => show("manual")}>
-          Pick a game yourself
-        </button>
-        <button className={how === "every" ? "current" : ""} onClick={() => show("every")}>
-          Every market
-        </button>
+        {HOW.map((h) => (
+          <button key={h.id} role="tab" aria-selected={how === h.id} className={how === h.id ? "current" : ""} onClick={() => setHow(h.id)}>
+            {h.label}
+          </button>
+        ))}
       </div>
-      {/* Each stays mounted once opened, with its own trade: switching never shows another mode's result. */}
+      {/* Each stays mounted, with its own trade: switching never shows another mode's result. */}
+      <div hidden={how !== "manual"}>
+        <ManualMode />
+      </div>
       <div hidden={how !== "strategy"}>
-        <StrategyMode mode={mode} />
+        <StrategyMode />
       </div>
-      {opened.manual && (
-        <div hidden={how !== "manual"}>
-          <ManualMode mode={mode} />
-        </div>
-      )}
-      {opened.every && (
-        <div hidden={how !== "every"}>
-          <EveryMarketMode mode={mode} />
-        </div>
-      )}
+      <div hidden={how !== "every"}>
+        <EveryMarketMode />
+      </div>
     </section>
   );
 }

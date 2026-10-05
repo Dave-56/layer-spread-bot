@@ -38,6 +38,14 @@ export default function Page() {
           Spread{" "}
           <span className="brand-tag">
             an example bot on <a href="https://uselayer.sh">uselayer</a>
+            {status ? (
+              <>
+                {" "}
+                <a className="quiet-link" href="https://pypi.org/project/uselayer/" title="The uselayer SDK on PyPI">
+                  {status.sdk_version}
+                </a>
+              </>
+            ) : null}
           </span>
         </div>
         <div className="header-actions">
@@ -83,14 +91,15 @@ export default function Page() {
               </button>
             </nav>
 
-            <PaperAccount />
-
-            {tab === "best" ? <BestVenue mode={mode} /> : <Arbitrage mode={mode} />}
-
-            <p className="small muted footer">
-              Built on <a href="https://uselayer.sh">uselayer.sh</a> ·{" "}
-              <a href="https://pypi.org/project/uselayer/">uselayer{status ? ` ${status.sdk_version}` : ""} on PyPI</a>
-            </p>
+            {/* Best venue sends nothing, so the paper account (and Reset) shows with Arbitrage only. */}
+            {tab === "best" ? (
+              <BestVenue />
+            ) : (
+              <>
+                <PaperAccount />
+                <Arbitrage mode={mode} />
+              </>
+            )}
           </div>
         </main>
         {chat && <Chat mode={mode} onClose={() => setChat(false)} />}

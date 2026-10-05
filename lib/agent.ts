@@ -142,10 +142,12 @@ async function compareVenues(raw: unknown): Promise<ToolOutput> {
   const best = await engine<BestResult & { match: MatchView }>("/best/preview", { method: "POST", body });
   const forModel = best.ok
     ? {
-        cheaper: best.why?.venue,
-        reason: best.why?.reason,
+        cheaper: best.compare?.cheaper ?? null,
+        // A venue that didn't answer: there's no comparison yet. Say so; don't call the other one cheaper.
+        unavailable: best.compare?.unavailable ?? [],
+        verdict: best.compare?.verdict ?? best.why?.reason,
         rule_warning: best.match?.rule_warning ?? null,
-        venues: best.why?.venues.map((v) => ({ venue: v.venue, all_in: v.all_in, avg_price: v.avg_price, fees: v.fees, size_at_limit: v.size_at_limit, skipped: v.skip, detail: v.detail })),
+        venues: best.why?.venues.map((v) => ({ venue: v.venue, all_in: v.all_in, avg_price: v.avg_price, fees: v.fees, size_at_limit: v.size_at_limit, skipped: v.skip, detail: best.compare?.venues.find((x) => x.venue === v.venue)?.skip_reason ?? v.detail })),
       }
     : { error: best.error };
   return { forModel, event: { type: "best", best } };

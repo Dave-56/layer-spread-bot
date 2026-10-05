@@ -169,8 +169,8 @@ function BlockView({ block, mode }: { block: Block; mode: "paper" | "live" }) {
     return (
       <div className="box">
         {b.match && <MatchLine m={b.match} />}
-        <CompareTable why={b.why} />
-        <div className="small">{verdictLine(b.why)}</div>
+        <CompareTable why={b.why} c={b.compare} />
+        <div className="small">{b.compare?.verdict ?? verdictLine(b.why)}</div>
       </div>
     );
   }
