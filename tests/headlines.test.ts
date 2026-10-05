@@ -69,13 +69,13 @@ describe("bestHeadline", () => {
         cheaper_name: null,
         side: "no",
         venues: [
-          kalshi({ ok: false, skip_reason: "best price above your max. The best ask is 0.98, above max_price 0.97." }),
+          kalshi({ ok: false, skip_reason: "best price 98¢, above your max of 97¢" }),
           pm({ ok: false, skip_reason: "nobody selling" }),
         ],
       }),
     );
     expect(h.title).toBe("No trade: neither venue can fill 100 NO right now");
-    expect(h.detail).toBe("Kalshi: best price above your max. The best ask is 0.98, above max_price 0.97. Polymarket US: nobody selling.");
+    expect(h.detail).toBe("Kalshi: best price 98¢, above your max of 97¢. Polymarket US: nobody selling.");
   });
   it("words a tie and a tiny saving plainly", () => {
     expect(bestHeadline(cmp({}), "tie_first_listed").title).toBe("Buy on Polymarket US: same price on both venues for 100 YES");

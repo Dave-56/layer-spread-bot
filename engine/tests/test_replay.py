@@ -226,3 +226,15 @@ def test_payout_rule() -> None:
 
     at = r.payout_at(Match.model_validate(MATCH))
     assert at is not None and at.isoformat() == "2026-10-11T02:00:00+00:00"  # later event + 6 h, before the close
+
+
+def test_layer_with_no_twin_is_not_found_not_a_crash() -> None:
+    from uselayer import VenueError
+
+    class _C:
+        def match(self, ticker, *, venue, with_):  # noqa: ANN001, ANN202
+            return {"source_market": {"venue": "kalshi", "market_id": ticker}, "matched_market": None}
+
+    with pytest.raises(VenueError) as e:
+        r.layer_match(_C(), "KXNOSUCH-1")  # type: ignore[arg-type]
+    assert e.value.code == "not_found"

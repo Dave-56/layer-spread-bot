@@ -32,19 +32,21 @@ export function when(iso: string | null | undefined): string | null {
   });
 }
 
+// The SDK's skip codes in words, the same as the engine's (views.SKIP). Never show the SDK's own
+// detail text ("The best ask is 0.98, above max_price 0.97.").
 export const SKIP: Record<string, string> = {
-  switched_off: "venue switched off in this release",
+  switched_off: "orders here are switched off in this release",
   no_key: "no key for this venue",
   not_allowed: "not allowed by your rules",
   not_found: "market not found",
   market_closed: "market closed",
-  no_book: "no book",
-  stale_book: "book too old",
+  no_book: "no prices yet",
+  stale_book: "its prices were too old to use; try again in a few seconds",
   no_offers: "nobody selling",
   above_max_price: "best price above your max",
   below_min_price: "best price below your min",
-  not_enough_size: "not enough size within the limit",
-  invalid_order: "breaks the market's tick or minimum",
+  not_enough_size: "not enough for sale within your max price",
+  invalid_order: "breaks the market's price step or minimum",
   not_held: "you don't hold it here",
-  unavailable: "venue didn't answer",
+  unavailable: "the venue didn't answer; try again",
 };

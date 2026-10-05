@@ -133,7 +133,7 @@ export interface VenueRow {
   ok: boolean;
   cheaper: boolean;
   skip: string | null;
-  skip_reason: string | null; // "best price above your max. The best ask is 0.98, above max_price 0.97."
+  skip_reason: string | null; // one plain clause, e.g. "best price 98¢, above your max of 97¢"
   price: number | null; // best ask for the side bought, in dollars
   price_label: string | null; // "54¢"
   chance_label: string | null; // "54%": the chance the market gives that side
@@ -296,29 +296,17 @@ export interface TradeResult {
   rule_warning: string | null;
 }
 
+// Each reason's group name on the Arbitrage screen (components/gaps.ts words the counts).
 export const VERDICT_LABEL: Record<Verdict, string> = {
-  unpriced: "Couldn't read prices",
+  unpriced: "Couldn't be priced",
   no_offers: "Nobody selling",
   no_gap: "No gap",
   fees: "Fees bigger than the gap",
-  below_min_edge: "Below your minimum",
-  too_thin: "Not enough for sale",
+  below_min_edge: "Under your minimum",
+  too_thin: "Too little for sale",
   no_payout_date: "No payout date",
   per_day_low: "Pays back too slowly",
   survivor: "Still money after fees",
-};
-
-// The same reasons, as a phrase in "No trade: 25 [are worded differently], 19 [have no gap]".
-export const VERDICT_PHRASE: Record<Verdict, string> = {
-  unpriced: "had prices we couldn't read",
-  no_offers: "have nobody selling on one venue",
-  no_gap: "have no gap",
-  fees: "have a gap smaller than the fees",
-  below_min_edge: "are below your minimum",
-  too_thin: "have too little for sale",
-  no_payout_date: "have no payout date",
-  per_day_low: "pay back too slowly",
-  survivor: "are still money after fees",
 };
 
 /** Survivors in the order to show them: worded the same on both venues first, then most profit

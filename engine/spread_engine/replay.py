@@ -225,6 +225,8 @@ def _saved_match(path: Path) -> Match | None:
 def layer_match(client: Client, ticker: str) -> Match:
     """A Kalshi ticker's Polymarket US twin, from Layer's matching (the SDK's only hosted call)."""
     d = client.match(ticker, venue="kalshi", with_="polymarket_us")
+    if not d.get("source_market") or not d.get("matched_market"):
+        raise VenueError("not_found", f"Layer has no Polymarket US match for {ticker}.", venue="kalshi")
     keep = {k: d.get(k) for k in ("confidence", "basis", "caveats", "tier")}
     return Match.model_validate({**keep, "kalshi": d["source_market"], "polymarket_us": d["matched_market"]})
 
