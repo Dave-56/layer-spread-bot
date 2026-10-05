@@ -23,6 +23,7 @@ const row = (v: Partial<VenueRow>): VenueRow => ({
   fillable: 500,
   total_cost: 54.4,
   total_cost_per_contract: 0.544,
+  cost_line: null,
   ...v,
 });
 

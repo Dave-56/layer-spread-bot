@@ -131,6 +131,9 @@ def test_preview_found_by_ticker_alone_and_labelled(engine, monkeypatch: pytest.
     k, u = cmp["venues"]
     assert (k["price_label"], k["chance_label"], k["fillable"], k["total_cost"], k["cheaper"]) == ("58¢", "58%", 954, 59.71, True)
     assert (u["price_label"], u["chance_label"], u["cheaper"]) == ("58.5¢", "58.5%", False)
+    # Each card says what the total is made of: the price paid, the fee, the total.
+    assert k["cost_line"] == "YES at 58¢ + $1.71 fee = $59.71"
+    assert u["cost_line"] == "YES at 59¢ avg + $1.68 fee = $60.68"  # walks the book past its 58.5¢ best
     assert (cmp["cheaper"], cmp["cheaper_name"], cmp["saving"], cmp["saving_label"]) == ("kalshi", "Kalshi", 0.97, "$0.97")
     assert cmp["verdict"] == "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
     assert body["why"]["venue"] == "kalshi"  # the SDK's own result is still there, unchanged
@@ -342,3 +345,18 @@ def test_preview_reads_again_once_when_a_book_was_too_old(engine, monkeypatch: p
     monkeypatch.setattr(engine, "client", lambda: _C())
     body = local(engine.app).post("/best/preview", json={"match_id": "KXMADEUPGAME-1-A", "side": "yes", "size": 100}).json()
     assert answers == [] and [v["skip"] for v in body["compare"]["venues"]] == [None, None]
+
+
+def test_cost_line_shows_the_fee_when_the_price_is_the_same() -> None:
+    from uselayer import VenueCost
+
+    from spread_engine.views import cost_line
+
+    # Same 22¢ on both: the 2¢ between the totals is all fees (Kalshi rounds up, Polymarket US to the nearest cent).
+    k = VenueCost("kalshi", "K", "yes", "buy", 100, best_price=0.22, avg_price=0.22, cost=22.0, fees=1.21, all_in=23.21)
+    u = VenueCost("polymarket_us", "U", "yes", "buy", 100, best_price=0.22, avg_price=0.22, cost=22.0, fees=1.19, all_in=23.19)
+    assert cost_line(k) == "YES at 22¢ + $1.21 fee = $23.21"
+    assert cost_line(u) == "YES at 22¢ + $1.19 fee = $23.19"
+    sell = VenueCost("kalshi", "K", "no", "sell", 100, best_price=0.3, avg_price=0.3, cost=30.0, fees=0.6, all_in=29.4)
+    assert cost_line(sell) == "NO at 30¢ − $0.60 fee = $29.40"
+    assert cost_line(VenueCost("kalshi", "K", "yes", "buy", 100, skip="no_offers")) is None
