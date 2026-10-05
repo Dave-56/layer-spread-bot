@@ -69,6 +69,17 @@ def main() -> int:
             print(f"    {v['venue_name']:14} {v['price_label']} ({v['chance_label']}) fees {v['fees']} fillable {v['fillable']} total {v['total_cost']} {v['skip_reason'] or ''}")
         print("   ", cmp.get("verdict") or r.json().get("error"))
 
+    # Every market: the next few sports markets, each compared on both venues, streamed.
+    t = time.monotonic()
+    with c.stream("POST", "/best/scan", json={"category": "sports", "limit": 3, "size": args.size}) as s:
+        events = [json.loads(line) for line in s.iter_lines() if line]
+    print(f"\n== best/scan ({time.monotonic() - t:.1f}s): {events[0]} → {events[-1]}")
+    for e in events:
+        if e["type"] == "row":
+            cmp = e["best"].get("compare") or {}
+            skipped = " ".join(v["skip_line"] for v in cmp.get("venues", []) if v.get("skip_line"))
+            print(f"  {e['outcome']:14} {e['match']['id']:45} {cmp.get('saving_label')} {skipped or e['best'].get('error_line') or ''}")
+
     if sig:
         t = time.monotonic()
         body = {"match_id": sig["match_id"], "side": sig["side"], "size": args.size}
