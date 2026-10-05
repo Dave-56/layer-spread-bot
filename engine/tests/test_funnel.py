@@ -67,22 +67,37 @@ def verdict(q: Quote | Exception, s: ScanSettings = ScanSettings(), m: Match | N
     return judge(m or match(), Fake(q), s)
 
 
-def test_rules_differ_drops_before_reading_books() -> None:
+def test_rule_difference_goes_through_every_check_with_a_warning() -> None:
     fake = Fake(quote(0.05, 0.03))
     r = judge(match(caveats=["timing_differs"]), fake, ScanSettings())
-    assert r["verdict"] == "rules_differ"
-    assert "deadline" in r["reason"]
-    assert fake.calls == 0 and r["quote"] is None
+    assert fake.calls == 1  # the books are read like any other match's
+    assert r["verdict"] == "survivor" and r["quote"] is not None
+    assert r["match"]["rule_warning"] == (
+        "Worded differently: different deadline, measurement time or timezone. The two could settle differently."
+    )
 
 
-def test_rules_differ_can_be_kept() -> None:
-    r = verdict(quote(0.05, 0.03), ScanSettings(skip_rule_differences=False), match(caveats=["source_differs"]))
-    assert r["verdict"] == "survivor"
+def test_rule_difference_is_dropped_only_by_the_same_checks() -> None:
+    r = verdict(quote(0.01, -0.005), m=match(caveats=["source_differs"]))
+    assert r["verdict"] == "fees"
+    assert r["match"]["rule_warning"].startswith("Worded differently: different data source.")
 
 
-def test_unpriced() -> None:
-    r = verdict(VenueError("stale_book", "The Kalshi book is stale."))
-    assert r["verdict"] == "unpriced" and "stale" in r["reason"]
+def test_no_warning_when_worded_the_same_and_every_caveat_named() -> None:
+    assert verdict(quote(0.05, 0.03))["match"]["rule_warning"] is None
+    w = verdict(quote(0.05, 0.03), m=match(caveats=["source_differs", "rounding_differs", "new_code"]))["match"]["rule_warning"]
+    assert w == (
+        "Worded differently: different data source, different rounding or threshold and new code. "
+        "The two could settle differently."
+    )
+
+
+def test_unpriced_is_a_plain_sentence_not_the_sdk_text() -> None:
+    r = verdict(VenueError("stale_quote", "The polymarket_us book for x is older than max_quote_age_s.", venue="polymarket_us"))
+    assert (r["verdict"], r["reason"]) == ("unpriced", "Polymarket US's prices didn't refresh in time to compare.")
+    r = verdict(VenueError("rate_limited", "429", venue="polymarket_us"))
+    assert r["reason"] == "Polymarket US is getting too many requests right now. Try again in a minute."
+    assert verdict(VenueError("weird_new_code", "x"))["reason"] == "Couldn't read the prices for this one. Try again in a minute."
 
 
 def test_no_offers() -> None:
@@ -92,13 +107,13 @@ def test_no_offers() -> None:
 def test_no_gap() -> None:
     r = verdict(quote(-0.02, -0.04))
     assert r["verdict"] == "no_gap"
-    assert "102.0¢" in r["reason"]
+    assert r["reason"] == "Both sides together cost 102¢, before fees."  # the group says "No gap"; this doesn't
 
 
 def test_fees_ate_it() -> None:
     r = verdict(quote(0.01, -0.005))
     assert r["verdict"] == "fees"
-    assert "1.0¢" in r["reason"] and "-0.5¢" in r["reason"]
+    assert r["reason"] == "A 1¢ gap before fees, −0.5¢ after."
 
 
 def test_below_min_edge() -> None:
@@ -125,5 +140,25 @@ def test_scan_counts_every_match_once() -> None:
     events = list(scan([match("A"), match("B", ["timing_differs"])], Fake(quote(0.01, -0.01)), ScanSettings()))
     assert events[0] == {"type": "start", "total": 2, "settings": ScanSettings().__dict__}
     done = events[-1]
-    assert done["counts"]["fees"] == 1 and done["counts"]["rules_differ"] == 1
+    assert done["counts"]["fees"] == 2 and "rules_differ" not in done["counts"]
     assert sum(done["counts"].values()) == 2
+    assert [e["match"]["rule_warning"] is not None for e in events[1:-1]] == [False, True]
+
+
+def test_scan_prices_several_at_once_and_keeps_the_order() -> None:
+    import threading
+    import time
+
+    seen: set[int] = set()
+
+    class Slow:
+        def quote(self, pair, *, size=None, min_edge=0.0):  # noqa: ANN001, ANN202
+            seen.add(threading.get_ident())
+            time.sleep(0.05)
+            return quote(-0.02, -0.04) if pair.kalshi.market_id.endswith("0") else quote(0.05, 0.03)
+
+    ms = [match(f"KXTEST-{i}") for i in range(8)]
+    out = list(scan(ms, Slow(), ScanSettings(), readers=4))
+    rows = [e for e in out if e["type"] == "row"]
+    assert [r["match"]["id"] for r in rows] == [f"KXTEST-{i}" for i in range(8)]
+    assert len(seen) > 1 and out[-1]["counts"]["no_gap"] == 1 and out[-1]["counts"]["survivor"] == 7

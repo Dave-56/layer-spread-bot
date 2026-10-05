@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cents, money, pct } from "@/components/format";
-import { errorText, ndjson } from "@/lib/engine";
+import { errorText, ndjson, survivorOrder, VERDICT_LABEL, type MatchView, type QuoteView } from "@/lib/engine";
 
 function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -40,5 +40,22 @@ describe("format", () => {
     expect(money(-0.15)).toBe("−$0.15");
     expect(money(3.1)).toBe("$3.10");
     expect(pct(1.23456, 3)).toBe("1.235%");
+  });
+});
+
+describe("rule differences", () => {
+  const row = (id: string, net: number, warning: string | null) => ({
+    match: { id, rule_warning: warning } as MatchView,
+    quote: { net_profit: net } as QuoteView,
+  });
+
+  it("lists survivors worded the same first, then by profit after fees", () => {
+    const rows = [row("A", 5, "Worded differently: different data source. The two could settle differently."), row("B", 1, null), row("C", 3, null)];
+    expect(survivorOrder(rows).map((r) => r.match.id)).toEqual(["C", "B", "A"]);
+    expect(rows.map((r) => r.match.id)).toEqual(["A", "B", "C"]); // a copy; the stream's order is kept
+  });
+
+  it("is never a reason to drop a gap", () => {
+    expect(Object.keys(VERDICT_LABEL)).not.toContain("rules_differ");
   });
 });

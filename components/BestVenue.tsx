@@ -67,8 +67,7 @@ export function CompareTable({ why }: { why: Why }) {
               {v.venue === why.venue && <span className="pill good">cheaper</span>}
               {v.skip && (
                 <div className="small muted">
-                  Skipped: {SKIP[v.skip] ?? v.skip}
-                  {v.detail ? `. ${v.detail}` : ""}
+                  Skipped: {SKIP[v.skip] ?? v.skip.replaceAll("_", " ")}
                 </div>
               )}
             </td>

@@ -8,6 +8,11 @@ one, the pair is found with Layer's matching: the file's Kalshi ticker and its P
 Each time either leg's book changes (at most once a second of recorded time), the pair goes through
 the same gates as the live scan (:func:`spread_engine.funnel.judge`), priced by the SDK's ``quote()``
 against the books as they stood then.
+
+A file whose sizes are placeholders (``"sizes_unknown": true`` in ``<name>.meta.json``) is priced at an
+assumed size, the one asked for, at the top price of both books: ``size_note`` says so with every
+result. A file from before the SDK's first fee schedule for a venue can't be priced at all
+(:class:`CannotPrice`, one plain sentence).
 """
 
 from __future__ import annotations
@@ -18,18 +23,28 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from uselayer import Client, Match, import_events
-from uselayer.books import Book
+from uselayer import Client, Match, VenueError, import_events, reconstruct_book
+from uselayer.books import Book, BookLevelChange, Level
+from uselayer.events import StreamGap
+from uselayer.venue_rules import history
 
 from .config import ROOT
 from .funnel import GATES, ScanSettings, judge
-from .views import match_view
+from .views import VENUE_NAMES, match_view
 
 RECORDINGS = ROOT / "recordings"
 STEP = timedelta(seconds=1)
 KINDS = (".jsonl", ".ndjson", ".csv", ".parquet")
 
 Lookup = Callable[[str], Match | None]  # a Kalshi ticker → its matched pair, or None
+
+
+class CannotPrice(Exception):
+    """The file can't be priced at all, with one plain sentence why."""
+
+
+NO_PAIR = "Can't replay this file: it doesn't hold a Kalshi market and its Polymarket US match together."
+NEVER_TOGETHER = "Can't replay this file: it never has prices on both venues at the same moment."
 
 
 def sidecar(path: Path) -> Path:
@@ -54,6 +69,63 @@ def sizes_unknown(m: dict[str, Any]) -> bool:
         return True
     text = " ".join(str(m.get(k, "")) for k in ("sizes", "size", "note", "notes")).lower()
     return "placeholder" in text
+
+
+def size_note(n: int) -> str:
+    """What a replay of a file without real sizes assumes, in words."""
+    contracts = "1 contract" if n == 1 else f"{n:,} contracts"
+    return f"Size unknown: assumes {contracts} at the top price on both venues."
+
+
+def assume_size(events: list[Any], legs: set[tuple[str, str]], n: int) -> list[Any]:
+    """A file whose sizes are placeholders, as books with only the top price on each side, ``n`` at each.
+
+    The prices are the file's; the size is the assumption. Level changes are applied to the last
+    full book first (the SDK's ``reconstruct_book``); a gap clears the book until the next full one.
+    """
+    out: list[Any] = []
+    current: dict[tuple[str, str], Book] = {}
+    for e in sorted(events, key=lambda e: e.as_of):
+        key = (getattr(e, "venue", None), getattr(e, "market", None))
+        if key not in legs:
+            out.append(e)
+            continue
+        if isinstance(e, StreamGap):
+            current.pop(key, None)  # type: ignore[arg-type]
+            out.append(e)
+            continue
+        if isinstance(e, Book):
+            book: Book | None = e
+        elif isinstance(e, BookLevelChange):
+            last = current.get(key)  # type: ignore[arg-type]
+            book = reconstruct_book([last, e]) if last is not None else None
+        else:
+            out.append(e)
+            continue
+        if book is None:
+            continue
+        current[key] = book  # type: ignore[index]
+        out.append(
+            book.model_copy(
+                update={
+                    "bids": tuple(Level(price=lv.price, size=n) for lv in book.bids[:1]),
+                    "asks": tuple(Level(price=lv.price, size=n) for lv in book.asks[:1]),
+                }
+            )
+        )
+    return out
+
+
+def no_rules_sentence(e: VenueError) -> str:
+    """Why a file from before a venue's first fee schedule in the SDK can't be priced, in one sentence."""
+    venue = e.venue or ""
+    name = VENUE_NAMES.get(venue, venue or "a venue")
+    try:
+        first = history(venue)[0].effective_from
+        since = f"{first:%b} {first.day}, {first.year}"
+    except (IndexError, VenueError):
+        return f"Can't replay this file: the SDK doesn't have {name}'s fees for the time it was recorded yet."
+    return f"Can't replay this file: it's from before {since}, and the SDK doesn't have {name}'s fees from before then yet."
 
 
 def _parse(t: str | None) -> datetime | None:
@@ -153,6 +225,8 @@ def _saved_match(path: Path) -> Match | None:
 def layer_match(client: Client, ticker: str) -> Match:
     """A Kalshi ticker's Polymarket US twin, from Layer's matching (the SDK's only hosted call)."""
     d = client.match(ticker, venue="kalshi", with_="polymarket_us")
+    if not d.get("source_market") or not d.get("matched_market"):
+        raise VenueError("not_found", f"Layer has no Polymarket US match for {ticker}.", venue="kalshi")
     keep = {k: d.get(k) for k in ("confidence", "basis", "caveats", "tier")}
     return Match.model_validate({**keep, "kalshi": d["source_market"], "polymarket_us": d["matched_market"]})
 
@@ -167,20 +241,27 @@ def find_pair(path: Path, markets: dict[str, list[str]], lookup: Lookup | None) 
         found = lookup(ticker) if lookup else None
         if found is not None and found.polymarket_us.market_id in pm:
             return found
-    raise LookupError(
-        f"{path.name} has no Kalshi market and its matched Polymarket US twin together. "
-        "Record both with: npm run record -- <kalshi ticker>"
-    )
+    raise LookupError(NO_PAIR)
 
 
 class _At:
-    """Quotes against the replay's books, with the payout time a backtest can't read from the venues."""
+    """Quotes against the replay's books, with the payout time a backtest can't read from the venues.
 
-    def __init__(self, client: Client, settles_at: datetime | None) -> None:
-        self.c, self.settles_at = client, settles_at
+    A payout time that has already passed at this moment of the recording (an estimate from a
+    season's start date, say) isn't one: that moment is priced without a return per day.
+    """
+
+    def __init__(self, client: Client, settles_at: datetime | None, now: datetime) -> None:
+        self.c = client
+        self.settles_at = settles_at if settles_at is not None and settles_at > now else None
+        self.error: VenueError | None = None
 
     def quote(self, pair: Any, *, size: int | None = None, min_edge: float = 0.0) -> Any:
-        return self.c.quote(pair, size=size, min_edge=min_edge, settles_at=self.settles_at)
+        try:
+            return self.c.quote(pair, size=size, min_edge=min_edge, settles_at=self.settles_at)
+        except VenueError as e:
+            self.error = e
+            raise
 
 
 def resolve(path: str) -> Path:
@@ -188,7 +269,7 @@ def resolve(path: str) -> Path:
     if not p.is_absolute():
         p = RECORDINGS / p.name  # a bare name means a file in recordings/
     if p.suffix not in KINDS or not p.is_file():
-        raise FileNotFoundError(f"No replayable file at {path} ({', '.join(KINDS)}).")
+        raise FileNotFoundError(f"There's no saved-prices file at {path}.")
     return p
 
 
@@ -203,21 +284,27 @@ def replay(path: str, s: ScanSettings, *, lookup: Lookup | None = None) -> dict[
     settles_at = _parse(info.get("settles_at")) or payout_at(m)
     no_depth = sizes_unknown(info)
     if no_depth:
-        # The file's sizes aren't real depth: price one contract at the top of both books, and
-        # never report how many would fill.
-        s = ScanSettings(size=1, min_edge=s.min_edge, min_return_per_day_pct=s.min_return_per_day_pct, skip_rule_differences=s.skip_rule_differences)
+        # The file's sizes aren't real depth. Price an assumed size (the one asked for) at the top
+        # price of both books, and say so. One contract would be wrong the other way: Kalshi rounds
+        # each order's fee up to the cent, so a 0.3¢ fee bills 1¢ and eats a real 1-2¢ gap.
+        evs = assume_size(evs, legs, s.size)
 
     counts = {g: 0 for g in GATES} | {"survivor": 0}
     st: dict[str, Any] = {"last": None, "prev": None, "span_start": None, "priced": False}
     best: dict[str, Any] = {"any": None, "survivor": None, "total": 0.0, "longest": 0.0}
+
+    no_rules: list[VenueError] = []
 
     def on_book(c: Client, b: Any) -> None:
         if (b.venue, b.market) not in legs:
             return
         if st["last"] is not None and b.as_of - st["last"] < STEP:
             return
-        row = judge(m, _At(c, settles_at), s)
+        at = _At(c, settles_at, b.as_of)
+        row = judge(m, at, s)
         if row["verdict"] == "unpriced" and not st["priced"]:
+            if at.error is not None and at.error.code == "no_venue_rules":
+                no_rules.append(at.error)
             return  # before both legs have a book
         st["priced"] = True
         st["last"] = b.as_of
@@ -240,6 +327,8 @@ def replay(path: str, s: ScanSettings, *, lookup: Lookup | None = None) -> dict[
                 best["any"] = row
 
     Client(mode="backtest", books=evs, store=":memory:", on_alert=lambda e: None).replay(on_book)
+    if not st["priced"]:
+        raise CannotPrice(no_rules_sentence(no_rules[0]) if no_rules else NEVER_TOGETHER)
     return {
         "path": str(p),
         "file": p.name,
@@ -247,6 +336,8 @@ def replay(path: str, s: ScanSettings, *, lookup: Lookup | None = None) -> dict[
         "to": summary["to"],
         "top_of_book_only": summary["top_of_book_only"] or no_depth,
         "size_unknown": no_depth,
+        "assumed_size": s.size if no_depth else None,
+        "size_note": size_note(s.size) if no_depth else None,
         "match": match_view(m),
         "settles_at": settles_at.isoformat() if settles_at else None,
         "moments": sum(counts.values()),
