@@ -152,12 +152,21 @@ export interface VenueRow {
   total_cost: number | null; // cost + fees for the whole order
   total_cost_per_contract: number | null;
   cost_line: string | null; // "100 YES at 22¢ + $1.21 fee = $23.21": price paid + fee = total (null when it can't fill)
+  // A dollar amount (spend): each venue at its own size, the most whole contracts the amount buys there.
+  contracts?: number | null;
+  payout?: number | null; // dollars back if you're right: $1 a contract
+  win_line?: string | null; // "Wins $92"
+  depth_limited?: boolean; // it ran out of contracts for sale before the money ran out
 }
 
 export interface CompareView {
   action: "buy" | "sell";
   side: "yes" | "no";
-  size: number;
+  size: number | null; // null for a dollar amount: each venue then has its own size (VenueRow.contracts)
+  spend?: number | null; // the dollar amount compared, or null for a contract count
+  spend_label?: string; // "$50"
+  pick_label?: string | null; // the chosen venue's pill for a dollar amount: "Pays more" or "Cheaper"
+  headline?: { title: string; detail: string | null; retry: boolean }; // the engine's answer for a dollar amount
   max_price: number | null;
   pair: PairView;
   venues: VenueRow[];
@@ -208,7 +217,8 @@ export interface StrategyList {
 export interface Signal {
   match_id: string;
   side: "yes" | "no";
-  size: number;
+  size: number | null; // contracts, or
+  spend?: number | null; // dollars: Best venue's Amount box (engine/spread_engine/spend.py)
   max_price: number | null;
   why: string;
   match: MatchView;
