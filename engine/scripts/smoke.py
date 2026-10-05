@@ -68,6 +68,7 @@ def main() -> int:
             print(
                 f"  {e['verdict']:15} {e['match']['id']:45} gross@best={q.get('gross_at_best')} "
                 f"net@best={q.get('edge_at_best')} contracts={q.get('contracts')} rpd={q.get('return_per_day_pct')} | {e['reason']}"
+                + (f" | {e['match']['rule_warning']}" if e["match"].get("rule_warning") else "")
             )
     survivors = [e for e in rows if e.get("verdict") == "survivor"]
     if survivors:

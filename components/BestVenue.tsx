@@ -10,7 +10,7 @@ import {
   type Signal,
   type StrategyInfo,
 } from "@/lib/engine";
-import { CAVEAT, cents, count, money, side, SKIP, when } from "./format";
+import { cents, count, money, side, SKIP, when } from "./format";
 import { fetchAccount, traded, type Account } from "./PaperAccount";
 
 // Job 1: your strategy already knows the trade. The bot prices that exact order on both venues,
@@ -88,9 +88,9 @@ export function MatchLine({ m }: { m: MatchView }) {
       ) : (
         "Polymarket US"
       )}
-      {m.caveats.length > 0 && (
+      {m.rule_warning && (
         <span className="pill warn" style={{ marginLeft: 6 }}>
-          rules differ: {m.caveats.map((c) => CAVEAT[c] ?? c).join(", ")}
+          {m.rule_warning}
         </span>
       )}
     </div>

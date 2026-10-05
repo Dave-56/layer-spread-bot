@@ -18,8 +18,8 @@ MATCH = {
 }
 
 
-def book(venue: str, market: str, at: str, bid: float, ask: float) -> dict:
-    return {"kind": "book", "venue": venue, "market": market, "bids": [{"price": bid, "size": 500.0}], "asks": [{"price": ask, "size": 500.0}], "as_of": at, "source": "venue"}
+def book(venue: str, market: str, at: str, bid: float, ask: float, size: float = 500.0) -> dict:
+    return {"kind": "book", "venue": venue, "market": market, "bids": [{"price": bid, "size": size}], "asks": [{"price": ask, "size": size}], "as_of": at, "source": "venue"}
 
 
 @pytest.fixture()
@@ -97,16 +97,88 @@ def test_a_file_without_a_saved_match_is_paired_by_lookup(recording: str, tmp_pa
     assert {f["file"] for f in r.list_files(str(other))} == {recording, "gaps.jsonl"}
 
 
-def test_placeholder_sizes_price_one_contract_and_say_size_unknown(recording: str, tmp_path: Path) -> None:
+def test_placeholder_sizes_price_the_assumed_size_and_say_so(recording: str, tmp_path: Path) -> None:
     (tmp_path / recording).with_suffix(".meta.json").write_text(
         json.dumps({"settles_at": "2026-10-11T03:00:00Z", "note": "sizes are placeholders: the source has no depth"})
     )
     out = r.replay(recording, ScanSettings(size=100))
     assert out["size_unknown"] is True and out["top_of_book_only"] is True
+    assert out["assumed_size"] == 100
+    assert out["size_note"] == "Size unknown: assumes 100 contracts at the top price on both venues."
     q = out["best_survivor"]["quote"]
-    assert q["contracts"] == 1  # per contract only; never the placeholder size as depth
+    assert q["contracts"] == 100 and q["a"]["contracts_at_best"] == 100  # the assumption, labelled
     assert out["settles_at"] == "2026-10-11T03:00:00+00:00"  # the meta's payout time wins
     assert r.list_files()[0]["size_unknown"] is True
+
+
+def thin_gap(tmp_path: Path, day: str = "2026-10-10") -> str:
+    """A MADE-UP file with placeholder sizes (1 a level): YES on Kalshi at 97¢ + NO on Polymarket US at 2¢ = a 1¢ gap."""
+    lines = [
+        book("kalshi", "KXTEST-26OCT10-A", f"{day}T12:00:00Z", 0.96, 0.97, size=1.0),
+        book("polymarket_us", "aec-test-a-b", f"{day}T12:00:01Z", 0.98, 0.99, size=1.0),
+        book("kalshi", "KXTEST-26OCT10-A", f"{day}T12:00:03Z", 0.96, 0.97, size=1.0),
+    ]
+    name = f"thin-{day}.jsonl"
+    (tmp_path / name).write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    r.sidecar(tmp_path / name).write_text(json.dumps(MATCH))
+    (tmp_path / name).with_suffix(".meta.json").write_text(json.dumps({"sizes_unknown": True}))
+    return name
+
+
+def test_a_real_one_cent_gap_survives_at_the_assumed_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    from uselayer import FeeSettings, calculate_fee
+    from uselayer.fees import dollars
+
+    monkeypatch.setattr(r, "RECORDINGS", tmp_path)
+    name = thin_gap(tmp_path)
+    at = datetime(2026, 10, 10, 12, tzinfo=UTC)
+    k_fee = dollars(calculate_fee(FeeSettings(venue="kalshi"), contracts=1, price=0.97, role="taker", at=at))
+    assert k_fee == 0.01  # Kalshi rounds a 0.2¢ fee up to 1¢ on one contract: the whole gap
+
+    one = r.replay(name, ScanSettings(size=1))["best_survivor"]["quote"]
+    assert one["net_profit"] == 0.0  # why one contract was the wrong default
+
+    out = r.replay(name, ScanSettings(size=100))
+    q = out["best_survivor"]["quote"]
+    assert q["contracts"] == 100 and q["gross_spread"] == pytest.approx(1.0)
+    k100 = dollars(calculate_fee(FeeSettings(venue="kalshi"), contracts=100, price=0.97, role="taker", at=at))
+    assert q["a"]["fee"] == k100  # the SDK's own fee, rounded per order
+    assert q["net_profit"] > 0.5
+    assert 0 < q["edge_at_best"] < q["gross_at_best"]  # per contract, fees before rounding
+
+
+def test_assume_size_applies_level_changes_and_keeps_the_top_price_only() -> None:
+    from datetime import UTC, datetime
+
+    from uselayer import Book, BookLevelChange, Level
+
+    t0, t1 = datetime(2026, 10, 10, 12, tzinfo=UTC), datetime(2026, 10, 10, 12, 0, 2, tzinfo=UTC)
+    full = Book(venue="kalshi", market="K", bids=[Level(price=0.4, size=1), Level(price=0.39, size=1)], asks=[Level(price=0.42, size=1), Level(price=0.45, size=1)], as_of=t0)
+    better = BookLevelChange(venue="kalshi", market="K", book_side="ask", price=0.41, size=1, as_of=t1)
+    other = Book(venue="kalshi", market="X", bids=[Level(price=0.1, size=7)], asks=[], as_of=t0)
+    out = r.assume_size([full, better, other], {("kalshi", "K")}, 50)
+    books = [b for b in out if b.market == "K"]
+    assert [(b.asks[0].price, b.asks[0].size, len(b.asks), b.bids[0].size) for b in books] == [(0.42, 50, 1, 50), (0.41, 50, 1, 50)]
+    assert other in out  # markets outside the pair pass through untouched
+
+
+def test_before_the_fee_schedule_says_so_in_one_sentence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(r, "RECORDINGS", tmp_path)
+    name = thin_gap(tmp_path, day="2026-09-20")  # Polymarket US's first schedule in the SDK is Sep 25
+    with pytest.raises(r.CannotPrice) as e:
+        r.replay(name, ScanSettings(size=100))
+    assert str(e.value) == (
+        "Can't replay this file: it's from before Sep 25, 2026, and the SDK doesn't have Polymarket US's fees from before then yet."
+    )
+
+
+def test_a_pair_worded_differently_is_replayed_with_its_warning(recording: str, tmp_path: Path) -> None:
+    r.sidecar(tmp_path / recording).write_text(json.dumps(MATCH | {"caveats": ["source_differs"]}))
+    out = r.replay(recording, ScanSettings(size=10))
+    assert out["counts"]["survivor"] >= 1
+    assert out["match"]["rule_warning"].startswith("Worded differently: different data source.")
 
 
 def test_no_pair_in_the_file_says_how_to_record(recording: str, tmp_path: Path) -> None:

@@ -2,17 +2,20 @@
 
 Each match goes through the same gates, in order, and stops at the first it fails:
 
-1. rules_differ    Layer flagged a rule difference between the two markets (its caveats).
-2. unpriced        A book couldn't be read (no key, stale book, the venue didn't answer).
-3. no_offers       One venue has nobody selling one side.
-4. no_gap          YES on one venue plus NO on the other costs $1.00 or more before fees.
-5. fees            There is a gap, but both venues' fees are bigger than it.
-6. below_min_edge  Something is left after fees, but less than your minimum per contract.
-7. too_thin        The books can't fill even one contract that clears your minimum.
-8. no_payout_date  You asked for a return per day, and neither venue gives a payout time.
-9. per_day_low     The return per day is below your minimum.
+1. unpriced        A book couldn't be read (no key, stale book, the venue didn't answer).
+2. no_offers       One venue has nobody selling one side.
+3. no_gap          YES on one venue plus NO on the other costs $1.00 or more before fees.
+4. fees            There is a gap, but both venues' fees are bigger than it.
+5. below_min_edge  Something is left after fees, but less than your minimum per contract.
+6. too_thin        The books can't fill even one contract that clears your minimum.
+7. no_payout_date  You asked for a return per day, and neither venue gives a payout time.
+8. per_day_low     The return per day is below your minimum.
 
 What's left is a survivor: gross spread → fees → net → return per day, all from ``client.quote()``.
+
+A match where Layer flagged a rule difference (a different data source, deadline, rounding, exception
+or definition) goes through the same gates as any other. It is never dropped for it: its
+``match.rule_warning`` says how the two are worded differently, and it travels with the match.
 """
 
 from __future__ import annotations
@@ -26,7 +29,6 @@ from uselayer import Match, Quote, VenueError
 from .views import VENUE_NAMES, error_view, match_view
 
 GATES = (
-    "rules_differ",
     "unpriced",
     "no_offers",
     "no_gap",
@@ -38,16 +40,6 @@ GATES = (
 )
 
 
-# Layer's codes: same event and outcome normally, but the rules differ on an edge case.
-CAVEATS = {
-    "source_differs": "different data source",
-    "timing_differs": "different deadline, measurement time or timezone",
-    "rounding_differs": "different rounding or threshold",
-    "carveout_differs": "different special exceptions (e.g. ambiguity rules)",
-    "definition_differs": "a term is defined differently",
-}
-
-
 class Quoter(Protocol):
     def quote(self, pair: Any, *, size: int | None = None, min_edge: float = 0.0) -> Quote: ...
 
@@ -57,7 +49,6 @@ class ScanSettings:
     size: int = 100
     min_edge: float = 0.0  # $ per contract after fees
     min_return_per_day_pct: float = 0.0
-    skip_rule_differences: bool = True
 
 
 def cents(x: float | None) -> str:
@@ -110,10 +101,6 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
         row["verdict"] = gate
         row["reason"] = reason
         return row
-
-    # Checked before any book is read: most of a scan's time is reading books.
-    if s.skip_rule_differences and m.caveats:
-        return drop("rules_differ", "The venues word this bet differently (" + ", ".join(CAVEATS.get(c, c) for c in m.caveats) + "), so they could pay out differently.")
 
     try:
         q = client.quote(m, size=s.size, min_edge=s.min_edge)

@@ -23,6 +23,28 @@ def market_view(m: Any) -> dict[str, Any]:
     }
 
 
+# Layer's codes: same event and outcome normally, but the rules differ on an edge case.
+CAVEATS = {
+    "source_differs": "different data source",
+    "timing_differs": "different deadline, measurement time or timezone",
+    "rounding_differs": "different rounding or threshold",
+    "carveout_differs": "different special exceptions (e.g. ambiguity rules)",
+    "definition_differs": "a term is defined differently",
+}
+
+
+def rule_warning(m: Match) -> str | None:
+    """Layer's rule difference for a match, as one plain warning, or None when it flagged none.
+
+    The match still goes through every check: the warning travels with it wherever it's shown.
+    """
+    if not m.caveats:
+        return None
+    words = [CAVEATS.get(c, c.replace("_", " ")) for c in m.caveats]
+    said = words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+    return f"Worded differently: {said}. The two could settle differently."
+
+
 def match_id(m: Match) -> str:
     """A match is keyed by its Kalshi market id (one Kalshi market has one Polymarket US twin)."""
     return m.kalshi.market_id
@@ -41,6 +63,7 @@ def match_view(m: Match) -> dict[str, Any]:
         "event_time": k.event_time or u.event_time,
         "confidence": m.confidence,
         "caveats": list(m.caveats),
+        "rule_warning": rule_warning(m),
         "kalshi": market_view(k),
         "polymarket_us": market_view(u),
     }

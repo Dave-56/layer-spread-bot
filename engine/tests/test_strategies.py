@@ -35,11 +35,19 @@ class _Prices:
         return self.a if venue == "kalshi" else self.b
 
 
-class _Client:
-    """Fake prices: {kalshi ticker: (Kalshi YES ask, Polymarket US YES ask)}."""
+class _Info:
+    def __init__(self, open_: bool) -> None:
+        self.open = open_
 
-    def __init__(self, asks: dict[str, tuple[float | None, float | None]]) -> None:
-        self.asks = asks
+
+class _Client:
+    """Fake prices: {kalshi ticker: (Kalshi YES ask, Polymarket US YES ask)}, and the markets that aren't open."""
+
+    def __init__(self, asks: dict[str, tuple[float | None, float | None]], closed: set[str] = frozenset()) -> None:  # type: ignore[assignment]
+        self.asks, self.closed = asks, closed
+
+    def market(self, market_id: str, *, venue: str) -> _Info:
+        return _Info(market_id not in self.closed)
 
     def prices(self, match: Match) -> _Prices:
         return _Prices(*self.asks[match.kalshi.market_id])
@@ -67,6 +75,30 @@ def test_examples_pick_what_they_say() -> None:
     assert fav and fav.match.kalshi.market_id == "A"
     assert dog and dog.match.kalshi.market_id == "B" and dog.max_price == 0.30
     assert gap and gap.match.kalshi.market_id == "C" and "7¢" in gap.why
+
+
+def test_examples_skip_closed_markets_and_dead_books() -> None:
+    # Each example would pick the first market here if it didn't check: Kalshi's market is closed
+    # (1¢ vs 50¢: the widest gap, the cheapest YES), then 99¢ and 1¢ books with no real price.
+    ms = [m("SHUT"), m("PMSHUT"), m("NINETYNINE"), m("ONE"), m("A"), m("B")]
+    c = _Client(
+        {"SHUT": (0.01, 0.50), "PMSHUT": (0.97, 0.02), "NINETYNINE": (0.99, 0.98), "ONE": (0.01, 0.02), "A": (0.62, 0.64), "B": (0.25, 0.29)},
+        closed={"SHUT", "pm-PMSHUT"},
+    )
+    picked = {sid: strategies.get(sid)(ms, c) for sid in ("first_match", "favorite", "underdog", "venues_disagree")}  # type: ignore[arg-type]
+    assert {sid: s.match.kalshi.market_id for sid, s in picked.items() if s} == {
+        "first_match": "A",
+        "favorite": "A",
+        "underdog": "B",
+        "venues_disagree": "B",
+    }
+
+
+def test_priced_can_include_rule_differences() -> None:
+    ms = [m("RULES", caveats=["source_differs"]), m("OK")]
+    c = _Client({"RULES": (0.4, 0.42), "OK": (0.5, 0.52)})
+    assert [x.kalshi.market_id for x, _ in strategies.priced(ms, c)] == ["OK"]  # type: ignore[arg-type]
+    assert [x.kalshi.market_id for x, _ in strategies.priced(ms, c, rules_differ_ok=True)] == ["RULES", "OK"]  # type: ignore[arg-type]
 
 
 def test_template_makes_no_trade() -> None:

@@ -67,17 +67,29 @@ def verdict(q: Quote | Exception, s: ScanSettings = ScanSettings(), m: Match | N
     return judge(m or match(), Fake(q), s)
 
 
-def test_rules_differ_drops_before_reading_books() -> None:
+def test_rule_difference_goes_through_every_check_with_a_warning() -> None:
     fake = Fake(quote(0.05, 0.03))
     r = judge(match(caveats=["timing_differs"]), fake, ScanSettings())
-    assert r["verdict"] == "rules_differ"
-    assert "deadline" in r["reason"]
-    assert fake.calls == 0 and r["quote"] is None
+    assert fake.calls == 1  # the books are read like any other match's
+    assert r["verdict"] == "survivor" and r["quote"] is not None
+    assert r["match"]["rule_warning"] == (
+        "Worded differently: different deadline, measurement time or timezone. The two could settle differently."
+    )
 
 
-def test_rules_differ_can_be_kept() -> None:
-    r = verdict(quote(0.05, 0.03), ScanSettings(skip_rule_differences=False), match(caveats=["source_differs"]))
-    assert r["verdict"] == "survivor"
+def test_rule_difference_is_dropped_only_by_the_same_checks() -> None:
+    r = verdict(quote(0.01, -0.005), m=match(caveats=["source_differs"]))
+    assert r["verdict"] == "fees"
+    assert r["match"]["rule_warning"].startswith("Worded differently: different data source.")
+
+
+def test_no_warning_when_worded_the_same_and_every_caveat_named() -> None:
+    assert verdict(quote(0.05, 0.03))["match"]["rule_warning"] is None
+    w = verdict(quote(0.05, 0.03), m=match(caveats=["source_differs", "rounding_differs", "new_code"]))["match"]["rule_warning"]
+    assert w == (
+        "Worded differently: different data source, different rounding or threshold and new code. "
+        "The two could settle differently."
+    )
 
 
 def test_unpriced() -> None:
@@ -125,5 +137,6 @@ def test_scan_counts_every_match_once() -> None:
     events = list(scan([match("A"), match("B", ["timing_differs"])], Fake(quote(0.01, -0.01)), ScanSettings()))
     assert events[0] == {"type": "start", "total": 2, "settings": ScanSettings().__dict__}
     done = events[-1]
-    assert done["counts"]["fees"] == 1 and done["counts"]["rules_differ"] == 1
+    assert done["counts"]["fees"] == 2 and "rules_differ" not in done["counts"]
     assert sum(done["counts"].values()) == 2
+    assert [e["match"]["rule_warning"] is not None for e in events[1:-1]] == [False, True]

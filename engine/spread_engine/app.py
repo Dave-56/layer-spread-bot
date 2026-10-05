@@ -35,7 +35,7 @@ from uselayer.guardrails import order_risk
 from . import config, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .strategies import upcoming
-from .views import error_view, match_id, match_view, over
+from .views import error_view, match_id, match_view, over, rule_warning
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -300,11 +300,15 @@ def replay_run(b: ReplayBody) -> dict[str, Any]:
         raise HTTPException(404, str(e)) from e
     except LookupError as e:
         raise HTTPException(422, str(e)) from e
+    except replay.CannotPrice as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @app.post("/arb/trade")
 def arb_trade(b: TradeBody) -> dict[str, Any]:
-    t = client().trade(_find(b.match_id), size=b.size, min_edge=b.min_edge)
+    m = _find(b.match_id)
+    t = client().trade(m, size=b.size, min_edge=b.min_edge)
     d = t.to_dict()
     d["quote"] = quote_view(t.quote)
-    return {"mode": settings.mode, **d}
+    # A match Layer flagged as worded differently is traded like any other, and says so with the result.
+    return {"mode": settings.mode, **d, "rule_warning": rule_warning(m)}

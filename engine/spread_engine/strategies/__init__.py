@@ -47,24 +47,48 @@ def upcoming(m: Match) -> bool:
         return True
 
 
-def priced(matches: list[Match], client: Client, *, limit: int = 10) -> Iterator[tuple[Match, Prices]]:
-    """Upcoming matches whose rules don't differ, with both venues' best prices (``client.prices``).
+# A YES ask at 1¢ or 99¢ is a book with no real price left: the outcome is all but decided, or
+# nobody is quoting it. Examples skip it so a comparison shows two real prices side by side.
+DEAD_LOW, DEAD_HIGH = 0.01, 0.99
 
-    Reads at most ``limit`` matches' prices (each read is both venues' books) and skips any where a
-    venue has no YES on offer.
+
+def open_on_both(m: Match, client: Client) -> bool:
+    """Both venues say the market is open for trading (``client.market(...).open``)."""
+    try:
+        return all(client.market(x.market_id, venue=x.venue).open for x in (m.kalshi, m.polymarket_us))
+    except VenueError:
+        return False
+
+
+def live_price(ask: float | None) -> bool:
+    """A YES ask someone is really quoting: on offer, and above 1¢ and below 99¢."""
+    return ask is not None and DEAD_LOW < ask < DEAD_HIGH
+
+
+def priced(
+    matches: list[Match], client: Client, *, limit: int = 10, rules_differ_ok: bool = False
+) -> Iterator[tuple[Match, Prices]]:
+    """Upcoming matches open on both venues, with both venues' best prices (``client.prices``).
+
+    Skips a match that has started, a market either venue says isn't open, and a venue with no real
+    YES price (none on offer, or 1¢/99¢). Reads at most ``limit`` matches' prices (each read is both
+    venues' books). A match Layer flagged as worded differently (``m.caveats``) is skipped unless
+    ``rules_differ_ok``: then it's yielded too, and the app shows its warning if you pick it.
     """
     looked = 0
     for m in matches:
-        if m.caveats or not upcoming(m):
+        if (m.caveats and not rules_differ_ok) or not upcoming(m):
             continue
         if looked == limit:
             return
+        if not open_on_both(m, client):
+            continue
         looked += 1
         try:
             p = client.prices(m)
         except VenueError:
             continue
-        if p.a.yes_ask is None or p.b.yes_ask is None:
+        if not live_price(p.a.yes_ask) or not live_price(p.b.yes_ask):
             continue
         yield m, p
 

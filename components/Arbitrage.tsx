@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   errorText,
   ndjson,
+  survivorOrder,
   VERDICT_LABEL,
   VERDICT_PHRASE,
   type QuoteView,
@@ -20,10 +21,10 @@ import { traded } from "./PaperAccount";
 
 // Job 2: scan matched markets for the same bet priced differently on the two venues, and show
 // what happened to every gap: dropped with a plain reason, or a survivor that's still money after
-// fees, rule differences and depth.
+// fees and depth. A match worded differently on the two venues goes through the same checks and
+// carries its warning (match.rule_warning) wherever it's shown.
 
 const ORDER: Verdict[] = [
-  "rules_differ",
   "unpriced",
   "no_offers",
   "no_gap",
@@ -136,6 +137,7 @@ export function DroppedTable({ rows }: { rows: ScanRow[] }) {
             <td>
               {r.match.outcome ?? r.match.title}
               <div className="small muted">{r.match.title}</div>
+              {r.match.rule_warning && <div className="pill warn">{r.match.rule_warning}</div>}
             </td>
             <td className="num">{cents(r.quote?.gross_at_best)}</td>
             <td className={`num ${(r.quote?.edge_at_best ?? 0) > 0 ? "pos" : ""}`}>{cents(r.quote?.edge_at_best)}</td>
@@ -183,6 +185,7 @@ function Survivor({ row, size, mode }: { row: ScanRow; size: number; mode: "pape
       <Legs q={q} />
       <SurvivorMath q={q} />
       {row.reason && <p className="small muted">{row.reason}</p>}
+      {row.match.rule_warning && <p className="pill warn">{row.match.rule_warning}</p>}
       <div className="row" style={{ marginTop: 10 }}>
         <button className="btn" onClick={go} disabled={busy}>
           {busy ? "Sending…" : mode === "live" ? "Buy both sides (real money)" : "Paper-trade both sides"}
@@ -195,6 +198,7 @@ function Survivor({ row, size, mode }: { row: ScanRow; size: number; mode: "pape
           <b>{trade.status}</b>: {count(trade.hedged)} contracts hedged, {money(trade.locked_in)} locked in after fees
           {trade.unwind_loss ? `, unwind cost ${money(trade.unwind_loss)}` : ""}.{" "}
           {trade.status === "missed" ? "No trade: the gap closed before the orders." : ""}
+          {trade.rule_warning && <span className="pill warn">{trade.rule_warning}</span>}
         </p>
       )}
     </div>
@@ -220,7 +224,7 @@ export function noTradeLine(f: FunnelState): string {
 }
 
 export function FunnelResult({ f, size, mode }: { f: FunnelState; size: number; mode: "paper" | "live" }) {
-  const survivors = f.rows.filter((r) => r.verdict === "survivor");
+  const survivors = survivorOrder(f.rows.filter((r) => r.verdict === "survivor"));
   const dropped = f.rows
     .filter((r) => r.verdict !== "survivor")
     .sort((a, b) => (b.quote?.edge_at_best ?? -9) - (a.quote?.edge_at_best ?? -9));
@@ -350,14 +354,12 @@ function replayNoTrade(res: ReplayResult): string {
     .map((v) => ({ v, k: res.counts[v] }))
     .sort((a, b) => b.k - a.k);
   if (!parts.length) return "No trade: the file never had prices on both venues at once.";
-  if (res.counts.rules_differ === res.moments) return "No trade: Kalshi and Polymarket US word this bet differently.";
   if (parts.length === 1) return `No trade at any of ${res.moments} moments: all ${VERDICT_PHRASE_ONE[parts[0].v]}.`;
   return `No trade at any of ${res.moments} moments: ${parts.map((x) => `${x.k} ${VERDICT_PHRASE_ONE[x.v]}`).join(", ")}.`;
 }
 
 // Per moment, e.g. "12 had no gap".
 const VERDICT_PHRASE_ONE: Record<Verdict, string> = {
-  rules_differ: "the bet is worded differently on the two venues",
   unpriced: "had prices we couldn't read",
   no_offers: "had nobody selling on one venue",
   no_gap: "had no gap",
@@ -461,7 +463,7 @@ function Replay() {
           <p className="small muted">
             {res.file}, checked at every price change (at most once a second).
             {res.size_unknown
-              ? " Top of book only, size unknown: prices are per contract."
+              ? ` ${res.size_note ?? "Size unknown."}`
               : res.top_of_book_only
                 ? " Top of book only."
                 : ""}
@@ -484,7 +486,8 @@ function Replay() {
             <div className="box good">
               <div className="label">Best moment · {when(shown.at)}</div>
               <Legs q={shown.quote} />
-              <SurvivorMath q={shown.quote} perContract={res.size_unknown} />
+              <SurvivorMath q={shown.quote} />
+              {res.size_note && <p className="small muted">{res.size_note}</p>}
               <p className="small muted" style={{ marginBottom: 0 }}>
                 The gap lasted {seconds(res.longest_survivor_s)} at its longest ({seconds(res.survivor_seconds)} in all).
               </p>

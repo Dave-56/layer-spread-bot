@@ -21,7 +21,10 @@ def decide(matches: list[Match], client: Client) -> Signal | None:
     # `client`: the uselayer SDK with your own keys. Read anything you need:
     #   p = client.prices(m)  → p.a.yes_ask, p.b.yes_ask, p.leg("kalshi").no_bid ...
     #   client.book(m.kalshi)  → a full order book
-    # `priced(matches, client)` gives you upcoming, rule-clean matches with both venues' prices.
+    # `priced(matches, client)` gives you upcoming matches open on both venues, worded the same on both,
+    #   with both venues' prices (a 1¢ or 99¢ YES ask is skipped as no real price).
+    #   `priced(matches, client, rules_differ_ok=True)` adds matches worded differently; the app warns
+    #   on any you pick (m.caveats says how they differ).
     #
     # Write your logic here: which market, YES or NO, how many contracts, and the most you'll pay.
     #
