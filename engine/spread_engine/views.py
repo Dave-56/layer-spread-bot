@@ -31,12 +31,13 @@ def market_view(m: Any) -> dict[str, Any]:
 
 
 # Layer's codes: same event and outcome normally, but the rules differ on an edge case.
+# Each finishes "Rules differ slightly on ...". Layer sends only the code, never which rule, so say the kind.
 CAVEATS = {
-    "source_differs": "different data source",
-    "timing_differs": "different deadline, measurement time or timezone",
-    "rounding_differs": "different rounding or threshold",
-    "carveout_differs": "different special exceptions (e.g. ambiguity rules)",
-    "definition_differs": "a term is defined differently",
+    "source_differs": "where the result comes from",
+    "timing_differs": "when the result is checked (deadline or timezone)",
+    "rounding_differs": "how numbers are rounded or the cutoff counted",
+    "carveout_differs": "how unusual cases are handled",
+    "definition_differs": "what a key term means",
 }
 
 
@@ -49,7 +50,7 @@ def rule_warning(m: Match) -> str | None:
         return None
     words = [CAVEATS.get(c, c.replace("_", " ")) for c in m.caveats]
     said = words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
-    return f"Worded differently: {said}. The two could settle differently."
+    return f"Rules differ slightly on {said}. Both pay the same in normal cases, but in a rare case one could pay and the other not."
 
 
 def match_id(m: Match) -> str:
@@ -227,8 +228,10 @@ def money_label(x: float | None) -> str | None:
 
 def match_note(m: Match) -> str:
     """Layer's word on the pair, in one or two plain sentences."""
-    conf = f" ({m.confidence * 100:.0f}% confidence)" if m.confidence is not None else ""
-    note = f"Layer matched these as the same bet{conf}."
+    if m.confidence is None:
+        note = "Layer matched these as the same bet."
+    else:
+        note = f"Layer is {m.confidence * 100:.0f}% sure these are the same bet."
     w = rule_warning(m)
     return f"{note} {w}" if w else note
 

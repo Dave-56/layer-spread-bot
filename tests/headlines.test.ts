@@ -37,7 +37,7 @@ const cmp = (c: Partial<CompareView>): CompareView => ({
   pair: {
     kalshi: { title: "A vs B", outcome: "A", question: "A wins", ticker: "K", url: null },
     polymarket_us: { title: "A vs B", outcome: "A", question: "Will A win?", slug: "p", url: null },
-    note: "Layer matched these as the same bet (95% confidence).",
+    note: "Layer is 95% sure these are the same bet.",
     confidence: 0.95,
     rule_warning: null,
   },
@@ -200,8 +200,8 @@ describe("every market", () => {
 
 describe("matchNote", () => {
   it("drops the rule warning the engine appends, since it's shown on its own", () => {
-    const w = "Worded differently: different data source. The two could settle differently.";
-    expect(matchNote(`Layer matched these as the same bet (95% confidence). ${w}`, w)).toBe("Layer matched these as the same bet (95% confidence).");
+    const w = "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not.";
+    expect(matchNote(`Layer is 95% sure these are the same bet. ${w}`, w)).toBe("Layer is 95% sure these are the same bet.");
   });
 });
 

@@ -41,7 +41,7 @@ const VENUES = ["kalshi", "polymarket_us"] as const;
 /** A price as the chance the market gives that side: 41¢ → "41%". */
 const chance = (p: number) => cents(p).replace("¢", "%");
 
-/** A quiet warning: the two venues word this bet differently, so they could settle differently. */
+/** A quiet warning: the rules differ slightly, so in a rare case the two could settle differently. */
 function RuleNote({ text }: { text: string | null | undefined }) {
   return text ? <div className="rule-note">{text}</div> : null;
 }
@@ -211,7 +211,7 @@ function DropGroup({ label, rows }: { label: string; rows: ScanRow[] }) {
             <span className="muted"> · {r.match.title}</span>
             {r.match.rule_warning && (
               <span className="pill warn" title={r.match.rule_warning}>
-                Worded differently
+                Rules differ
               </span>
             )}
             <div className="small muted">{r.reason}</div>

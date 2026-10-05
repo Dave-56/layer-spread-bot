@@ -126,7 +126,7 @@ export function MatchLine({ m }: { m: MatchView }) {
 
 // ---- Best venue ---------------------------------------------------------------------------------
 
-/** A quiet warning: the two venues word this bet differently, so they could settle differently. */
+/** A quiet warning: the rules differ slightly, so in a rare case the two could settle differently. */
 function RuleNote({ text }: { text: string | null | undefined }) {
   if (!text) return null;
   return <div className="rule-note">{text}</div>;
@@ -578,7 +578,7 @@ function StrategyMode() {
                         {m.outcome ?? m.title}
                         {m.rule_warning && (
                           <span className="pill warn" style={{ marginLeft: 8 }} title={m.rule_warning}>
-                            worded differently
+                            rules differ
                           </span>
                         )}
                         <div className="small muted">{m.title}</div>
@@ -897,7 +897,7 @@ function EveryMarketMode() {
                     </span>
                     {r.match.rule_warning && (
                       <span className="pill warn" title={r.match.rule_warning}>
-                        Worded differently
+                        Rules differ
                       </span>
                     )}
                   </span>

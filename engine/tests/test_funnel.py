@@ -73,22 +73,23 @@ def test_rule_difference_goes_through_every_check_with_a_warning() -> None:
     assert fake.calls == 1  # the books are read like any other match's
     assert r["verdict"] == "survivor" and r["quote"] is not None
     assert r["match"]["rule_warning"] == (
-        "Worded differently: different deadline, measurement time or timezone. The two could settle differently."
+        "Rules differ slightly on when the result is checked (deadline or timezone). "
+        "Both pay the same in normal cases, but in a rare case one could pay and the other not."
     )
 
 
 def test_rule_difference_is_dropped_only_by_the_same_checks() -> None:
     r = verdict(quote(0.01, -0.005), m=match(caveats=["source_differs"]))
     assert r["verdict"] == "fees"
-    assert r["match"]["rule_warning"].startswith("Worded differently: different data source.")
+    assert r["match"]["rule_warning"].startswith("Rules differ slightly on where the result comes from.")
 
 
 def test_no_warning_when_worded_the_same_and_every_caveat_named() -> None:
     assert verdict(quote(0.05, 0.03))["match"]["rule_warning"] is None
     w = verdict(quote(0.05, 0.03), m=match(caveats=["source_differs", "rounding_differs", "new_code"]))["match"]["rule_warning"]
     assert w == (
-        "Worded differently: different data source, different rounding or threshold and new code. "
-        "The two could settle differently."
+        "Rules differ slightly on where the result comes from, how numbers are rounded or the cutoff counted "
+        "and new code. Both pay the same in normal cases, but in a rare case one could pay and the other not."
     )
 
 

@@ -27,8 +27,8 @@ export interface MatchView {
   event_time: string | null;
   confidence: number | null;
   caveats: string[];
-  // Layer flagged a rule difference, as one sentence to show with the match, e.g. "Worded differently:
-  // different data source. The two could settle differently." null when none.
+  // Layer flagged a rule difference, as one sentence to show with the match, e.g. "Rules differ slightly
+  // on where the result comes from. Both pay the same in normal cases, but ..." null when none.
   rule_warning: string | null;
   // The same for every outcome of one game or event: group search results by it.
   event_key: string | null;
@@ -124,7 +124,7 @@ export interface BestResult {
 export interface PairView {
   kalshi: { title: string | null; outcome: string | null; question: string | null; ticker: string; url: string | null };
   polymarket_us: { title: string | null; outcome: string | null; question: string | null; slug: string; url: string | null };
-  note: string; // "Layer matched these as the same bet (95% confidence)." (+ the rule warning, if any)
+  note: string; // "Layer is 95% sure these are the same bet." (+ the rule warning, if any)
   confidence: number | null;
   rule_warning: string | null;
 }
