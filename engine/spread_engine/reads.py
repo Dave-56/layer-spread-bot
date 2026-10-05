@@ -16,7 +16,8 @@ a public SDK option), which:
 - **spaces book reads**: at most :data:`BOOK_READS` in any :data:`BOOK_WINDOW_S` seconds; a read
   past that waits for a slot. Other gateway requests are paced at :data:`GATEWAY_PER_S`;
 - **stops when told to**: after a 429 on a book it sends no book read until ``Retry-After`` has
-  passed. A wait of a few seconds is waited out; a longer one is answered here, without a request,
+  passed. A wait of a few seconds (a whole block, in a background scan: ``cached_books(wait_out=)``)
+  is waited out; a longer one is answered here, without a request,
   so the SDK's three retries end within ~3 s and the app can say "busy, try again" instead of
   hanging for half a minute;
 - **reuses a book for a few seconds** (:data:`BOOK_TTL_S`) inside :func:`cached_books`, so a strategy's
@@ -52,16 +53,22 @@ CACHE_MAX_AGE_S = 5.0  # a copy already older than this at the venue isn't reuse
 WAIT_OUT_S = 3.0  # a Retry-After this short is waited out; a longer one is answered as busy
 
 _use_cache: ContextVar[bool] = ContextVar("spread_cache_books", default=False)
+_wait_out: ContextVar[float] = ContextVar("spread_wait_out", default=WAIT_OUT_S)
 
 
 @contextmanager
-def cached_books() -> Iterator[None]:
-    """Reads in this block may reuse a Polymarket US book read in the last few seconds. Never for orders."""
-    token = _use_cache.set(True)
+def cached_books(*, wait_out: float = WAIT_OUT_S) -> Iterator[None]:
+    """Reads in this block may reuse a Polymarket US book read in the last few seconds. Never for orders.
+
+    ``wait_out``: the longest "too many requests" wait to sit through before answering busy. A click
+    waits a few seconds at most; a scan that runs in the background can wait out a whole block.
+    """
+    tokens = (_use_cache.set(True), _wait_out.set(wait_out))
     try:
         yield
     finally:
-        _use_cache.reset(token)
+        _wait_out.reset(tokens[1])
+        _use_cache.reset(tokens[0])
 
 
 def is_book(request: httpx.Request) -> bool:
@@ -174,8 +181,9 @@ class GatewayReads(httpx.BaseTransport):
             self.gateway.take()
             self._count("gateway")
             return self.inner.handle_request(request)
+        patience = _wait_out.get()
         wait = self.hold_until - self.clock()
-        if wait > WAIT_OUT_S:
+        if wait > patience:
             self._count("held")
             return _busy(request, "held")
         if wait > 0:
@@ -188,7 +196,7 @@ class GatewayReads(httpx.BaseTransport):
             wait = _retry_after(r)
             with self.lock:
                 self.hold_until = max(self.hold_until, self.clock() + wait)
-            if wait > WAIT_OUT_S:
+            if wait > patience:
                 # The SDK would sleep the whole Retry-After before each of its 3 retries (~30 s). The
                 # hold above keeps the wait instead, and the retries are answered here: busy, fast.
                 r.close()

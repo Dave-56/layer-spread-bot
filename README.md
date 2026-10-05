@@ -64,7 +64,7 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
-"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes about a minute. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market worded differently on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
+"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market worded differently on the two venues is shown with that warning. Click a row to see the same comparison as a strategy's.
 
 ### Add your own
 

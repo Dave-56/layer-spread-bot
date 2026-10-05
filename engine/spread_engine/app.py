@@ -355,7 +355,9 @@ class EveryMarketBody(BaseModel):
 
 
 def _scan_price(m: Match, side: str, size: int) -> dict[str, Any]:
-    with cached_books():  # each comparison's book read is reused by the preview of its chosen order
+    # Each comparison's book read is reused by the preview of its chosen order, and a scan runs in the
+    # background, so it sits through a "too many requests" block rather than skipping markets.
+    with cached_books(wait_out=15.0):
         return _price(m, side, size)
 
 

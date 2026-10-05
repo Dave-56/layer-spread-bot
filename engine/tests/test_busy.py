@@ -150,6 +150,17 @@ def test_after_a_429_nothing_is_sent_until_retry_after() -> None:
     assert t.counts["held"] == 1 and t.counts["429"] == 1
 
 
+def test_a_background_scan_waits_out_a_block() -> None:
+    clock = Clock()
+    venue = Venue(busy=1, retry_after="7")
+    t = GatewayReads(venue, clock=clock, sleep=clock.sleep, fake_busy=False)
+    with cached_books(wait_out=15.0):
+        r = get(t, "/v1/markets/a/book")
+        assert r.status_code == 429 and r.headers["retry-after"] == "7"  # the SDK sleeps it, then retries
+        assert get(t, "/v1/markets/b/book").status_code == 200  # waited for the hold, then sent
+    assert clock.slept and t.counts["held"] == 0
+
+
 def test_other_hosts_go_straight_through() -> None:
     clock = Clock()
     venue = Venue(busy=1)
