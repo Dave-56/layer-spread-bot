@@ -21,6 +21,7 @@ const row = (v: Partial<VenueRow>): VenueRow => ({
   limit_price: 0.56,
   fees: 1,
   fillable: 500,
+  cap_label: "59¢",
   total_cost: 54.4,
   total_cost_per_contract: 0.544,
   ...v,
@@ -48,6 +49,8 @@ const cmp = (c: Partial<CompareView>): CompareView => ({
   saving: 1.8,
   saving_label: "$1.80",
   verdict: "Polymarket US is $1.80 cheaper for 100 contracts, fees included: $52.60 vs $54.40.",
+  try_size: null,
+  collar_note: null,
   as_of: "",
   ...c,
 });
@@ -86,6 +89,25 @@ describe("bestHeadline", () => {
     );
     expect(h.title).toBe("No trade: neither venue can fill 100 NO right now");
     expect(h.detail).toBe("Kalshi's cheapest offer is 98¢, above your 97¢ limit. Nobody is selling NO on Polymarket US right now.");
+  });
+  it("says why a thin market can't fill a big order, after the venues' sentences", () => {
+    const h = bestHeadline(
+      cmp({
+        cheaper: null,
+        cheaper_name: null,
+        try_size: 15,
+        collar_note: "Spread pays at most 5¢ above a venue's cheapest offer, so a thin market can't fill a big order.",
+        venues: [
+          kalshi({ ok: false, skip_reason: "Kalshi has only 40 YES for sale at 39¢ or less." }),
+          pm({ ok: false, skip_reason: "Polymarket US has only 15 YES for sale at 36¢ or less." }),
+        ],
+      }),
+    );
+    expect(h.title).toBe("No trade: neither venue can fill 100 YES right now");
+    expect(h.detail).toBe(
+      "Kalshi has only 40 YES for sale at 39¢ or less. Polymarket US has only 15 YES for sale at 36¢ or less. " +
+        "Spread pays at most 5¢ above a venue's cheapest offer, so a thin market can't fill a big order.",
+    );
   });
   it("never calls the other venue the only one when a venue didn't answer", () => {
     // The owner's case: Kalshi priced it, Polymarket US said "too many requests".
