@@ -32,7 +32,8 @@ def market_view(m: Any) -> dict[str, Any]:
 
 
 # Layer's codes: same event and outcome normally, but the rules differ on an edge case.
-# Each finishes "Rules differ slightly on ...". Layer sends only the code, never which rule, so say the kind.
+# Each finishes "Rules differ slightly on ...". The code says only the kind; which rule is in
+# rule_reasons, when Layer sends it.
 CAVEATS = {
     "source_differs": "where the result comes from",
     "timing_differs": "when the result is checked (deadline or timezone)",
@@ -54,6 +55,21 @@ def rule_warning(m: Match) -> str | None:
     return f"Rules differ slightly on {said}. Both pay the same in normal cases, but in a rare case one could pay and the other not."
 
 
+def rule_reasons(m: Match) -> list[str]:
+    """Why the rules differ, in Layer's words: one sentence per caveat saying what each venue's rules
+    say, e.g. "Kalshi settles on the league's official box score; Polymarket US uses ESPN."
+
+    Empty when Layer sent none (an older match, or one approved by hand): the warning then stands alone.
+    """
+    notes = getattr(m, "caveat_notes", None) or {}
+    out: list[str] = []
+    for c in m.caveats:
+        note = notes.get(c) if isinstance(notes, dict) else None
+        if isinstance(note, str) and note.strip() and note.strip() not in out:
+            out.append(note.strip())
+    return out
+
+
 def match_id(m: Match) -> str:
     """A match is keyed by its Kalshi market id (one Kalshi market has one Polymarket US twin)."""
     return m.kalshi.market_id
@@ -73,6 +89,7 @@ def match_view(m: Match) -> dict[str, Any]:
         "confidence": m.confidence,
         "caveats": list(m.caveats),
         "rule_warning": rule_warning(m),
+        "rule_reasons": rule_reasons(m),
         "event_key": k.group_id or u.group_id,  # the same for every outcome of one game or event
         "kalshi": market_view(k),
         "polymarket_us": market_view(u),
@@ -246,6 +263,7 @@ def pair_view(m: Match) -> dict[str, Any]:
         "note": match_note(m),
         "confidence": m.confidence,
         "rule_warning": rule_warning(m),
+        "rule_reasons": rule_reasons(m),
     }
 
 

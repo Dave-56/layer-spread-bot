@@ -228,6 +228,7 @@ def layer_match(client: Client, ticker: str) -> Match:
     if not d.get("source_market") or not d.get("matched_market"):
         raise VenueError("not_found", f"Layer has no Polymarket US match for {ticker}.", venue="kalshi")
     keep = {k: d.get(k) for k in ("confidence", "basis", "caveats", "tier")}
+    keep["caveat_notes"] = d.get("caveat_notes") or {}  # why the rules differ, when Layer says
     return Match.model_validate({**keep, "kalshi": d["source_market"], "polymarket_us": d["matched_market"]})
 
 

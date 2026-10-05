@@ -68,6 +68,11 @@ export function matchNote(note: string, ruleWarning: string | null): string {
   return ruleWarning ? note.replace(ruleWarning, "").trim() : note;
 }
 
+/** A rule warning with Layer's reasons after it, for a hover title. undefined when the rules match. */
+export function ruleTitle(m: { rule_warning: string | null; rule_reasons?: string[] }): string | undefined {
+  return m.rule_warning ? [m.rule_warning, ...(m.rule_reasons ?? [])].join(" ") : undefined;
+}
+
 /** Why a strategy made no trade, when it didn't say: one plain sentence. */
 export function strategyNoTrade(r: { started?: number; looked?: { reason: string }[] }, searched = false): string {
   const started = r.started ?? 0;

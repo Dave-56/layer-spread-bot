@@ -43,7 +43,7 @@ from . import config, every_market, recorder, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .reads import GatewayReads, cached_books
 from .strategies import upcoming
-from .views import _time, busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
+from .views import _time, busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_reasons, rule_warning, trade_error
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -569,4 +569,4 @@ def arb_trade(b: TradeBody) -> dict[str, Any]:
     d = t.to_dict()
     d["quote"] = quote_view(t.quote)
     # A match Layer flagged as worded differently is traded like any other, and says so with the result.
-    return {"mode": settings.mode, **d, "rule_warning": rule_warning(m)}
+    return {"mode": settings.mode, **d, "rule_warning": rule_warning(m), "rule_reasons": rule_reasons(m)}

@@ -129,6 +129,7 @@ def test_preview_found_by_ticker_alone_and_labelled(engine, monkeypatch: pytest.
         "note": "Layer is 95% sure these are the same bet.",
         "confidence": 0.95,
         "rule_warning": None,
+        "rule_reasons": [],
     }
     k, u = cmp["venues"]
     assert (k["price_label"], k["chance_label"], k["fillable"], k["total_cost"], k["cheaper"]) == ("58¢", "58%", 954, 59.71, True)
