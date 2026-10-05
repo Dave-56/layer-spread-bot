@@ -66,9 +66,11 @@ Each one looks only at markets that are open on both venues, worded the same on 
 
 ### Add your own
 
-1. Copy the template: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`. Or press "Upload a .py file" on the "Add your own" card of the Best venue screen: it saves your file in that folder and selects it.
+1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`, or press "Download the starter file" on the "Add your own" card of the Best venue screen and save it under a new name.
 2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
-3. Reload the page and pick its card. Edits to a strategy apply on the next run, without a restart.
+3. Press "Upload a .py file" on the same card: it saves your file in that folder and selects it. (A file you copied into the folder shows up when you reload the page.) Edits to a strategy apply on the next run, without a restart.
+
+The starter file itself isn't in the list, since it never trades.
 
 ```python
 from . import SPORTS, NoTrade, Signal, priced

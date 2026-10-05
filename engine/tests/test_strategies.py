@@ -97,8 +97,7 @@ def test_templates_are_grouped_by_category_with_yours_last() -> None:
         ("Sports", "sports_game_day"),
         ("Crypto", "crypto_near_certain"),
         ("News, politics & economics", "news_near_certain"),
-        ("Your own", "my_strategy"),
-    ]
+    ]  # my_strategy.py, the starter file, isn't listed: it never trades. The app offers it as a download.
     for r in rows:
         assert r["name"] and r["description"] and r["error"] is None
         text = (r["name"] + r["description"]).lower()
@@ -249,6 +248,12 @@ def test_replacing_needs_a_yes_and_a_bad_replacement_keeps_the_old_file(folder: 
         strategies.add("mine_two.py", "def decide(:\n", replace=True)
     assert (folder / "mine_two.py").read_text() == GOOD
     assert strategies.add("mine_two.py", GOOD.replace('"Mine"', '"Mine 2"'), replace=True)["name"] == "Mine 2"
+
+
+def test_the_starter_file_cannot_be_replaced() -> None:
+    with pytest.raises(strategies.BadStrategy, match="my_strategy.py is the starter file"):
+        strategies.add("my_strategy.py", GOOD, replace=True)
+    assert "def decide(" in strategies.starter()
 
 
 def test_examples_cannot_be_replaced() -> None:

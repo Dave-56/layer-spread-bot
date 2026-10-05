@@ -42,6 +42,9 @@ YOURS = "Your own"
 CATEGORIES = (SPORTS, CRYPTO, NEWS, YOURS)  # the order the picker groups them in
 
 FOLDER = Path(__file__).resolve().parent
+# The starter file: where your own strategy begins. It never trades, so the picker doesn't list it;
+# the app offers it as a download instead (GET /strategies/starter).
+STARTER = "my_strategy"
 
 
 @dataclass(frozen=True)
@@ -253,7 +256,7 @@ def available() -> list[dict[str, Any]]:
     Grouped in :data:`CATEGORIES` order, then by ``ORDER``. A file that doesn't load is listed with
     ``error`` (one line) so it can be fixed, and can't be run.
     """
-    rows = [_row(*e) for e in _entries()]
+    rows = [_row(*e) for e in _entries() if e[0] != STARTER]
     return sorted(rows, key=lambda r: (CATEGORIES.index(r["category"]), r["order"], r["name"]))
 
 
@@ -268,6 +271,11 @@ def module(strategy_id: str) -> ModuleType:
 
 def get(strategy_id: str) -> Decide:
     return module(strategy_id).decide  # type: ignore[no-any-return]
+
+
+def starter() -> str:
+    """The starter file's text, to download and edit."""
+    return (FOLDER / f"{STARTER}.py").read_text()
 
 
 # ---- adding your own file -------------------------------------------------------------------------
@@ -297,6 +305,8 @@ def add(filename: str, code: str, *, replace: bool = False) -> dict[str, Any]:
     path = FOLDER / name
     sid = name[:-3]
     old = path.read_text() if path.exists() else None
+    if sid == STARTER:
+        raise BadStrategy(f"{name} is the starter file. Save yours under another name, e.g. momentum.py.")
     if old is not None:
         existing = next((r for r in available() if r["id"] == sid), None)
         if existing and existing["example"]:

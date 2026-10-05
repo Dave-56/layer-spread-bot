@@ -412,6 +412,19 @@ function AddYourOwn({ onAdded }: { onAdded: (b: StrategyList & { added: Strategy
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
+  // The starter file (my_strategy.py), saved in the browser: edit it, rename it, upload it back.
+  async function download() {
+    try {
+      const b = await getJson<{ filename: string; code: string }>("/engine/strategies/starter");
+      const url = URL.createObjectURL(new Blob([b.code], { type: "text/x-python" }));
+      const a = Object.assign(document.createElement("a"), { href: url, download: b.filename });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setMsg({ text: e instanceof Error ? e.message : String(e), bad: true });
+    }
+  }
+
   async function send(file: File | undefined, again = false) {
     if (!file) return;
     setBusy(true);
@@ -445,6 +458,9 @@ function AddYourOwn({ onAdded }: { onAdded: (b: StrategyList & { added: Strategy
           {busy ? "Uploading…" : "Upload a .py file"}
         </button>
         <input ref={input} type="file" accept=".py" hidden onChange={(e) => send(e.target.files?.[0])} />
+        <button className="link" onClick={download}>
+          Download the starter file
+        </button>
         {replace && (
           <button className="btn quiet" onClick={() => send(replace, true)} disabled={busy}>
             Replace it
@@ -461,7 +477,6 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
   const [list, setList] = useState<StrategyInfo[] | null>(null);
   const [cats, setCats] = useState<string[]>([]);
   const [pick, setPick] = useState("sports_favorite");
-  const [q, setQ] = useState("");
   const [noTrade, setNoTrade] = useState<string | null>(null);
   const [looked, setLooked] = useState<Looked[] | null>(null);
   const [allLooked, setAllLooked] = useState(false);
@@ -488,12 +503,12 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
     setLooked(null);
     setAllLooked(false);
     try {
+      // Each strategy picks its own markets: no search here.
       const qs = new URLSearchParams({ strategy: pick, limit: "50" });
-      if (q.trim()) qs.set("q", q.trim());
       const r = await getJson<SignalResult>(`/engine/best/signal?${qs}`);
       if (r.signal) t.show(r.signal, "Your strategy picked", r.best);
       else {
-        setNoTrade(r.no_trade ?? `No trade: ${strategyNoTrade(r, !!q.trim())}`);
+        setNoTrade(r.no_trade ?? `No trade: ${strategyNoTrade(r)}`);
         setLooked(r.looked ?? []);
       }
     } catch (e) {
@@ -542,19 +557,6 @@ function StrategyMode({ mode }: { mode: "paper" | "live" }) {
         <button className="btn big" onClick={run} disabled={t.busy !== null || !runnable}>
           {t.busy === "run" ? "Running…" : chosen ? `Run “${chosen.name}”` : "Run strategy"}
         </button>
-        <details className="settings">
-          <summary>Settings</summary>
-          <label className="field">
-            Markets it looks at
-            <input
-              className="search"
-              value={q}
-              placeholder="search, e.g. nba (blank: all)"
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && run()}
-            />
-          </label>
-        </details>
       </div>
 
       <Working t={t} label="Running the strategy, then checking prices on both venues" />
