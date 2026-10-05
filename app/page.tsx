@@ -64,7 +64,7 @@ export default function Page() {
 
             {down && (
               <p className="notice">
-                The engine isn&apos;t answering on 127.0.0.1:8765. Start everything with <code>npm run dev</code>.
+                The engine isn&apos;t running. Start it with <code>npm run dev</code>.
               </p>
             )}
             {missing.length > 0 && (
@@ -87,7 +87,7 @@ export default function Page() {
 
             {tab === "best" ? <BestVenue mode={mode} /> : <Arbitrage mode={mode} />}
 
-            <p className="small muted" style={{ marginTop: 40 }}>
+            <p className="small muted footer">
               Built on <a href="https://uselayer.sh">uselayer.sh</a> ·{" "}
               <a href="https://pypi.org/project/uselayer/">uselayer{status ? ` ${status.sdk_version}` : ""} on PyPI</a>
             </p>

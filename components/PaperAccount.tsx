@@ -48,8 +48,10 @@ export default function PaperAccount() {
     window.dispatchEvent(new Event("spread:reset"));
   }
 
+  // An empty paper account says nothing worth reading: it appears once there's a trade.
   if (!acct) return null;
   const paper = acct.mode === "paper";
+  if (paper && !acct.positions.length && !acct.open_orders) return null;
   return (
     <div className="account small">
       <span>

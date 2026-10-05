@@ -254,6 +254,12 @@ def list_strategies() -> dict[str, Any]:
     return {"categories": list(strategies.CATEGORIES), "strategies": strategies.available()}
 
 
+@app.get("/strategies/starter")
+def strategy_starter() -> dict[str, Any]:
+    """The starter file (my_strategy.py) to download and make your own. It isn't in the picker."""
+    return {"filename": f"{strategies.STARTER}.py", "code": strategies.starter()}
+
+
 class StrategyFile(BaseModel):
     filename: str = Field(max_length=60)
     code: str

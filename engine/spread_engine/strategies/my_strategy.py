@@ -1,8 +1,9 @@
-"""YOUR STRATEGY. Copy this file (e.g. to strategies/momentum.py), give it a NAME, write decide().
+"""YOUR STRATEGY: the starter file. Save a copy under a new name (e.g. strategies/momentum.py), give it a
+NAME, CATEGORY and DESCRIPTION, and write decide().
 
-It shows up in the app's strategy picker on the Best venue tab, under "Your own". Edits are picked up
-the next time you press "Run strategy"; a new file appears after you reload the page. You can also add
-a file from the app ("Add your strategy"), which saves it in this folder.
+This file itself isn't in the app's picker (it never trades). The Best venue tab's "Add your own" card
+offers it as a download; upload your edited copy there under its new name, or drop it in this folder
+and reload the page. Edits are picked up the next time you press Run.
 """
 
 from __future__ import annotations

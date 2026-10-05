@@ -62,13 +62,15 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
-"Pick a trade yourself" on the same screen skips the strategy: search for any game or market, pick the outcome, YES or NO, contracts and a max price.
+"Pick a game yourself" on the same screen skips the strategy: search for any game or market, pick the outcome, YES or NO and contracts (a max price is under Settings).
 
 ### Add your own
 
-1. Copy the template: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`. Or press "add a .py file" on the Best venue screen: it saves your file in that folder.
+1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`, or press "Download the starter file" on the "Add your own" card of the Best venue screen and save it under a new name.
 2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
-3. Reload the page and pick it. Edits to a strategy apply on the next run, without a restart.
+3. Press "Upload a .py file" on the same card: it saves your file in that folder and selects it. (A file you copied into the folder shows up when you reload the page.) Edits to a strategy apply on the next run, without a restart.
+
+The starter file itself isn't in the list, since it never trades.
 
 ```python
 from . import SPORTS, NoTrade, Signal, priced

@@ -158,6 +158,13 @@ def test_add_a_strategy_from_the_app(engine, monkeypatch: pytest.MonkeyPatch, tm
         sys.modules.pop("spread_engine.strategies.mine_app", None)
 
 
+def test_the_starter_file_is_a_download_not_a_choice(engine) -> None:  # noqa: ANN001
+    c = local(engine.app)
+    body = c.get("/strategies/starter").json()
+    assert body["filename"] == "my_strategy.py" and "def decide(" in body["code"]
+    assert "my_strategy" not in [s["id"] for s in c.get("/strategies").json()["strategies"]]
+
+
 def test_no_trade_says_the_strategy_sentence(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
     asked: list = []
 
