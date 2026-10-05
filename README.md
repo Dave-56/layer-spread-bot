@@ -30,7 +30,7 @@ You need [Node 20+](https://nodejs.org) and [uv](https://docs.astral.sh/uv/) (`b
 ```bash
 git clone https://github.com/Dave-56/layer-spread-bot
 cd layer-spread-bot
-npm run setup              # npm install + the engine's Python packages
+npm run setup              # installs the app (npm ci) and the engine's Python packages (uv sync)
 cp .env.example .env       # then fill in your keys (below)
 npm run dev                # starts the engine and the app together
 ```
