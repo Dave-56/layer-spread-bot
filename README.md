@@ -28,7 +28,7 @@ Nothing is hosted and nothing is deployed. Layer gets your Layer API key, the ma
 You need [Node 20+](https://nodejs.org) and [uv](https://docs.astral.sh/uv/) (`brew install uv`, or `curl -LsSf https://astral.sh/uv/install.sh | sh`). uv fetches Python 3.11+ if you don't have it.
 
 ```bash
-git clone https://github.com/Dave-56/layer-spread-bot
+git clone https://github.com/uselayer/layer-spread-bot
 cd layer-spread-bot
 npm run setup              # installs the app (npm ci) and the engine's Python packages (uv sync)
 cp .env.example .env       # then fill in your keys (below)
