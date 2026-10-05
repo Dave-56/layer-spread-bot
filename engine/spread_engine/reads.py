@@ -146,6 +146,7 @@ class GatewayReads(httpx.BaseTransport):
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         fake_busy: bool | None = None,
+        keep_open: bool = False,
     ) -> None:
         self.inner = inner or httpx.HTTPTransport()
         self.clock, self.sleep = clock, sleep
@@ -158,6 +159,9 @@ class GatewayReads(httpx.BaseTransport):
         if fake_busy is None:
             fake_busy = os.environ.get("SPREAD_FAKE_BUSY", "").strip().lower() == "polymarket_us"
         self.fake_busy = fake_busy
+        # Shared by several SDK clients (the engine's and the scan's), so one window paces them all:
+        # a client closing (paper reset) mustn't close it for the others.
+        self.keep_open = keep_open
 
     def _count(self, what: str) -> None:
         with self.lock:
@@ -216,4 +220,5 @@ class GatewayReads(httpx.BaseTransport):
         )
 
     def close(self) -> None:
-        self.inner.close()
+        if not self.keep_open:
+            self.inner.close()

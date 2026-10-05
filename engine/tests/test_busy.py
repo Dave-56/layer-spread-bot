@@ -419,3 +419,9 @@ def test_every_market_counts_a_venue_that_didnt_answer_as_couldnt_check() -> Non
     assert every_market.outcome(best) == "error"
     best["compare"]["unavailable"] = []
     assert every_market.outcome(best) == "one_venue"
+
+
+def test_the_arbitrage_scan_is_paced_with_the_engine(engine) -> None:  # noqa: ANN001
+    # One transport (one window) for the engine's client and the scan's, so their reads add up.
+    assert engine.gateway() is engine.gateway() and engine.gateway().keep_open
+    assert engine.scan_client()._http._client._transport is engine.gateway()

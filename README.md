@@ -5,7 +5,7 @@ With uselayer, your trading bot keeps its own strategy and gains two abilities: 
 Spread runs on your machine, with your own keys, across **Kalshi** and **Polymarket US**. It has two screens:
 
 - **Best venue.** You (by hand), your strategy, or "Every market" for a whole list decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it shows which venue is cheaper for that exact order, after fees. It sends nothing.
-- **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: the rules differ, a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see gross spread → fees → net → return per day, and you can paper-trade both legs.
+- **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see both venues side by side, then gross gap → fees → net → return per day, and you can paper-trade both sides. When the two venues word a bet differently, Spread still checks it and shows a warning with it.
 
 An optional chat panel answers the same questions in plain English, with your own LLM key.
 
@@ -107,22 +107,31 @@ A strategy file is your own Python, run by the engine on your machine with your 
 
 ## How the arbitrage scan works
 
-`engine/spread_engine/funnel.py`. Each matched market stops at the first check it fails:
+Press **Scan**. Settings (folded) holds the search, contracts (100), minimum profit a contract (0¢), minimum return a day (0%) and how many markets (50). A scan of 50 takes about two minutes: Polymarket US asks for a pause when its books are read often, and the SDK waits for it.
 
-1. **Rules differ.** Layer flagged a rule difference: a different data source, deadline, rounding, exception or definition. These are dropped before any book is read. The two markets could settle differently, so "both sides pay $1" may not hold.
-2. **Couldn't price.** A book couldn't be read (no key, a stale book, the venue didn't answer).
-3. **No offers.** One venue has nobody selling one side.
-4. **No gap.** YES on one venue plus NO on the other costs $1.00 or more before fees.
-5. **Fees ate the gap.** There's a gap, but the two venues' fees are bigger.
-6. **Below your minimum.** Something is left after fees, but less than your minimum per contract.
-7. **Too thin.** The books can't fill even one contract that clears your minimum.
-8. **Return per day too low.** Below your minimum. A 2% gap paid in a month is worse than 1% paid tomorrow.
+The answer comes first: "2 of 50 gaps are still money after fees", or one sentence saying why none is, e.g. "No trade: 46 of 50 have no gap, 3 lose the gap to fees and 1 has nobody selling on one venue."
 
-Every number comes from the SDK's `client.quote()`: the gross spread, both venues' fees, the net, and the return per day until the later of the two markets pays out. Expect most scans to end with no survivor. When nothing is still money after fees, the right move is no trade.
+`engine/spread_engine/funnel.py`. Each matched market stops at the first check it fails, and the fold below the answer lists the dropped ones under these names, one plain sentence each:
+
+1. **Couldn't be priced.** A venue didn't answer, asked for fewer requests, or its key is missing.
+2. **Nobody selling.** One venue has nobody selling one side.
+3. **No gap.** YES on one venue plus NO on the other costs $1.00 or more before fees.
+4. **Fees bigger than the gap.** There's a gap, but the two venues' fees are bigger.
+5. **Under your minimum.** Something is left after fees, but less than your minimum a contract.
+6. **Too little for sale.** The books can't fill even one contract that clears your minimum.
+7. **Pays back too slowly.** The return per day is under your minimum. A 2% gap paid in a month is worse than 1% paid tomorrow.
+
+A gap that survives is a card: both venues side by side (the side to buy, its price as a % and in ¢, and a link to each market), then gross gap → fees → net → return per day for the whole order. Every number comes from the SDK's `client.quote()`.
+
+**Paper-trade both sides** calls `client.trade()`. It reads both books again, and buys only if the gap is still there after fees (at least your minimum a contract); otherwise nothing is bought, and it says so. The scan accepts a book up to 30 seconds old, the age of Polymarket US's cached public book; the trade keeps the SDK's 10-second rule. If a book is older than that, it reads both books once more, then sends nothing and says why.
+
+**Worded differently.** Layer flags a match whose two markets differ on an edge case: a different data source, deadline, rounding, exception or definition. Spread doesn't drop it. It goes through the same checks as any other match and carries an amber note, e.g. "Worded differently: different data source. The two could settle differently." Then "both sides pay $1" may not hold, so a gap worded differently is listed below the ones worded the same.
+
+Expect most scans to end with no gap. When nothing is still money after fees, the right move is no trade.
 
 ## Replay prices you saved
 
-The Replay switch on the Arbitrage screen runs saved order books through the same checks as the live scan, in the SDK's backtest mode, moment by moment.
+The Replay switch on the Arbitrage screen runs saved order books through the same checks as the live scan, in the SDK's backtest mode, moment by moment. Pick a file and press **Replay**.
 
 Save a matched pair's books while it trades (both venues, every change):
 
@@ -132,9 +141,17 @@ npm run record -- KXNBAGAME-26OCT05MEMATL-ATL --minutes 60
 
 Use any Kalshi ticker from a scan; Layer finds its Polymarket US twin. Files go to `recordings/` (not committed), with the match saved next to them. Recording needs your Kalshi key and your Polymarket US key (its live stream is read with your key; nothing is traded).
 
-Any other file the SDK's `import_events` reads works too: type its folder into "Folder" and pick it. A file without a saved match is paired through Layer's matching. An optional `<name>.meta.json` beside it can give `settles_at` and `"sizes_unknown": true` (then prices are per contract, top of book only).
+Any other file the SDK's `import_events` reads works too: type its folder under Settings → Folder. A file without a saved match is paired through Layer's matching. An optional `<name>.meta.json` beside it can give `settles_at` and `"sizes_unknown": true`, for a file whose order sizes are placeholders. Such a file is priced at the Contracts number under Settings (100 by default) at the top price on both venues, and the result says so: "Size unknown: assumes 100 contracts at the top price on both venues." That's an assumption, not depth the file shows. It isn't priced at 1 contract because Kalshi rounds each order's fee up to the cent: on one contract a 0.3¢ fee bills 1¢ and hides a real 1–2¢ gap.
 
-The result: "Replay of <date>", how many moments were checked and why each was dropped, and the best moment's gross spread → fees → net → return per day, with how long the gap lasted.
+Replays use the SDK's dated fee schedules (uselayer 0.4.1: Kalshi from Oct 1, 2025, Polymarket US from Nov 3, 2025). A payout time that has already passed at a moment of the file (a season-long market whose venue gives the season's start, say) is left out for that moment, so it's priced without a return per day.
+
+The answer comes first: "2 of 8 moments were still money after fees" and how long the gap lasted, then the best moment as the same card as a live gap, and the other moments by reason, folded. When there's nothing to show, it's one sentence:
+
+- No files: "No saved prices on this computer yet: save some with npm run record -- <kalshi ticker>."
+- No pair in the file: "Can't replay this file: it doesn't hold a Kalshi market and its Polymarket US match together."
+- Too early: "Can't replay this file: it's from before Nov 3, 2025, and the SDK doesn't have Polymarket US's fees from before then yet."
+- Never priced: "Can't replay this file: it never has prices on both venues at the same moment."
+- Nothing survived: "No trade at any of 62 moments: 60 of 62 had no gap and 2 lost the gap to fees."
 
 ## Tests
 

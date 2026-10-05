@@ -2,31 +2,34 @@
 
 Each match goes through the same gates, in order, and stops at the first it fails:
 
-1. rules_differ    Layer flagged a rule difference between the two markets (its caveats).
-2. unpriced        A book couldn't be read (no key, stale book, the venue didn't answer).
-3. no_offers       One venue has nobody selling one side.
-4. no_gap          YES on one venue plus NO on the other costs $1.00 or more before fees.
-5. fees            There is a gap, but both venues' fees are bigger than it.
-6. below_min_edge  Something is left after fees, but less than your minimum per contract.
-7. too_thin        The books can't fill even one contract that clears your minimum.
-8. no_payout_date  You asked for a return per day, and neither venue gives a payout time.
-9. per_day_low     The return per day is below your minimum.
+1. unpriced        A book couldn't be read (no key, stale book, the venue didn't answer).
+2. no_offers       One venue has nobody selling one side.
+3. no_gap          YES on one venue plus NO on the other costs $1.00 or more before fees.
+4. fees            There is a gap, but both venues' fees are bigger than it.
+5. below_min_edge  Something is left after fees, but less than your minimum per contract.
+6. too_thin        The books can't fill even one contract that clears your minimum.
+7. no_payout_date  You asked for a return per day, and neither venue gives a payout time.
+8. per_day_low     The return per day is below your minimum.
 
 What's left is a survivor: gross spread → fees → net → return per day, all from ``client.quote()``.
+
+A match where Layer flagged a rule difference (a different data source, deadline, rounding, exception
+or definition) goes through the same gates as any other. It is never dropped for it: its
+``match.rule_warning`` says how the two are worded differently, and it travels with the match.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from uselayer import Match, Quote, VenueError
 
-from .views import VENUE_NAMES, error_view, match_view
+from .views import VENUE_NAMES, error_line, match_view
 
 GATES = (
-    "rules_differ",
     "unpriced",
     "no_offers",
     "no_gap",
@@ -38,16 +41,6 @@ GATES = (
 )
 
 
-# Layer's codes: same event and outcome normally, but the rules differ on an edge case.
-CAVEATS = {
-    "source_differs": "different data source",
-    "timing_differs": "different deadline, measurement time or timezone",
-    "rounding_differs": "different rounding or threshold",
-    "carveout_differs": "different special exceptions (e.g. ambiguity rules)",
-    "definition_differs": "a term is defined differently",
-}
-
-
 class Quoter(Protocol):
     def quote(self, pair: Any, *, size: int | None = None, min_edge: float = 0.0) -> Quote: ...
 
@@ -57,11 +50,14 @@ class ScanSettings:
     size: int = 100
     min_edge: float = 0.0  # $ per contract after fees
     min_return_per_day_pct: float = 0.0
-    skip_rule_differences: bool = True
 
 
 def cents(x: float | None) -> str:
-    return "—" if x is None else f"{x * 100:.1f}¢"
+    """``1¢``, ``0.6¢``, ``−0.6¢``: at most one decimal, none when it's whole."""
+    if x is None:
+        return "—"
+    c = round(x * 100, 1)
+    return f"{'−' if c < 0 else ''}{abs(c):g}¢"
 
 
 def quote_view(q: Quote) -> dict[str, Any]:
@@ -111,34 +107,22 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
         row["reason"] = reason
         return row
 
-    # Checked before any book is read: most of a scan's time is reading books.
-    if s.skip_rule_differences and m.caveats:
-        return drop("rules_differ", "The venues word this bet differently (" + ", ".join(CAVEATS.get(c, c) for c in m.caveats) + "), so they could pay out differently.")
-
     try:
         q = client.quote(m, size=s.size, min_edge=s.min_edge)
     except VenueError as e:
-        return drop("unpriced", error_view(e)["message"])
+        return drop("unpriced", error_line(e))
     row["quote"] = quote_view(q)
 
+    # Each reason is one plain sentence that adds to its group's name ("No gap"), never repeats it.
     if q.a is None or q.b is None or q.gross_at_best is None or q.edge_at_best is None:
-        return drop("no_offers", "Nobody is selling on one venue.")
+        return drop("no_offers", "Nobody is selling on one of the two venues.")
     gross, edge = q.gross_at_best, q.edge_at_best
     if gross <= 0:
-        return drop(
-            "no_gap",
-            f"No gap: both sides together cost {cents(1 - gross)}, before fees.",
-        )
+        return drop("no_gap", f"Both sides together cost {cents(1 - gross)}, before fees.")
     if edge <= 0:
-        return drop(
-            "fees",
-            f"The fees are bigger than the gap: {cents(gross)} a contract before fees, {cents(edge)} after.",
-        )
+        return drop("fees", f"A {cents(gross)} gap before fees, {cents(edge)} after.")
     if edge <= s.min_edge:
-        return drop(
-            "below_min_edge",
-            f"{cents(edge)} a contract after fees, under your minimum of {cents(s.min_edge)}.",
-        )
+        return drop("below_min_edge", f"{cents(edge)} a contract after fees; your minimum is {cents(s.min_edge)}.")
     if q.contracts < 1:
         return drop("too_thin", "Not enough for sale to buy even one contract at a profit.")
     if s.min_return_per_day_pct > 0:
@@ -147,8 +131,8 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
         if q.return_per_day_pct < s.min_return_per_day_pct:
             return drop(
                 "per_day_low",
-                f"Pays back too slowly: {q.return_per_day_pct:.3f}% a day, under your minimum of "
-                f"{s.min_return_per_day_pct:g}% ({q.return_pct:.2f}% over {q.days_held:g} days).",
+                f"{q.return_per_day_pct:.3f}% a day ({q.return_pct:.2f}% over {q.days_held:g} days); "
+                f"your minimum is {s.min_return_per_day_pct:g}%.",
             )
     row["verdict"] = "survivor"
     if q.contracts < s.size:
@@ -156,12 +140,18 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
     return row
 
 
-def scan(matches: list[Match], client: Quoter, s: ScanSettings) -> Iterator[dict[str, Any]]:
-    """Stream the funnel: a ``start`` event, one ``row`` per match, then ``done`` with the counts."""
+def scan(matches: list[Match], client: Quoter, s: ScanSettings, *, readers: int = 1) -> Iterator[dict[str, Any]]:
+    """Stream the funnel: a ``start`` event, one ``row`` per match, then ``done`` with the counts.
+
+    ``readers`` matches are priced at once (each is both venues' books), and rows come in match order.
+    """
     counts = {g: 0 for g in GATES} | {"survivor": 0}
     yield {"type": "start", "total": len(matches), "settings": s.__dict__}
-    for m in matches:
-        row = judge(m, client, s)
-        counts[row["verdict"]] += 1
-        yield {"type": "row", **row}
+    pool = ThreadPoolExecutor(max_workers=max(1, readers))
+    try:
+        for row in pool.map(lambda m: judge(m, client, s), matches):
+            counts[row["verdict"]] += 1
+            yield {"type": "row", **row}
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)  # the app stopped reading: stop pricing
     yield {"type": "done", "total": len(matches), "counts": counts}

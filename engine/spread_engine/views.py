@@ -201,7 +201,9 @@ def skip_line(v: Any, limit: float | None = None) -> str | None:
 def error_line(e: Exception) -> str:
     """A comparison that couldn't run, as one plain sentence."""
     if isinstance(e, VenueError):
-        return plain_error(e)
+        plain = plain_error(e)
+        if plain != e.message:  # a code we word; any other keeps out of sight (never the SDK's text)
+            return plain
     return "Couldn't read the prices for this one. Try again in a few seconds."
 
 
@@ -346,3 +348,20 @@ def compare_view(m: Match, why: Any) -> dict[str, Any]:
         "verdict": verdict_line(why),
         "as_of": why.as_of.isoformat(),
     }
+
+
+def trade_error(e: VenueError) -> str:
+    """Why a paper or live trade sent nothing, in one plain sentence (never the SDK's own text)."""
+    name = VENUE_NAMES.get(e.venue or "", "A venue")
+    if e.code == "stale_quote":
+        return f"{name}'s prices were more than 10 seconds old, so nothing was bought. Try again."
+    if e.code == "blocked_by_rule":
+        rule = getattr(e, "rule", None)
+        if rule == "kill_switch":
+            return "The kill switch is on, so nothing was bought."
+        if rule == "budget":
+            return "This trade would take your account over its limit, so nothing was bought. Reset the paper account, or raise BOT_BUDGET in .env."
+        return "Your safety rules in .env blocked this trade, so nothing was bought."
+    if e.code == "market_closed":
+        return f"{name} has closed this market, so nothing was bought."
+    return f"{error_line(e)} Nothing was bought."

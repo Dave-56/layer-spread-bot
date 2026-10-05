@@ -38,7 +38,7 @@ from . import config, every_market, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .reads import GatewayReads, cached_books
 from .strategies import upcoming
-from .views import busy_sentence, compare_view, error_line, error_view, match_id, match_view, over
+from .views import busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -48,6 +48,18 @@ _matches: dict[str, Match] = {}  # every match seen, by its Kalshi market id
 _client: Client | None = None
 _client_error: dict[str, Any] | None = None
 _lock = threading.Lock()
+
+
+_gateway: GatewayReads | None = None
+
+
+def gateway() -> GatewayReads:
+    """The one Polymarket US transport (reads.py) every SDK client here shares, so one window paces
+    the engine's reads and the arbitrage scan's together."""
+    global _gateway
+    if _gateway is None:
+        _gateway = GatewayReads(fake_busy=None if settings.mode == "paper" else False, keep_open=True)
+    return _gateway
 
 
 def client() -> Client:
@@ -66,13 +78,38 @@ def client() -> Client:
                     on_alert=_alerts.append,
                     # Polymarket US reads: paced, stopped after a 429, a book reused for a few seconds
                     # outside orders (reads.py). SPREAD_FAKE_BUSY works in paper mode only.
-                    transport=GatewayReads(fake_busy=None if settings.mode == "paper" else False),
+                    transport=gateway(),
                 )
                 _client_error = None
             except VenueError as e:
                 _client_error = error_view(e)
                 raise
         return _client
+
+
+# The scan only reads books (``quote()``); it never sends an order. Polymarket US serves its public
+# book from a cache that's up to 30 s old, and asks for a 10 s pause when read often, so with the
+# SDK's 10 s limit a scan waits for fresh copies again and again. The scan accepts a book up to 30 s
+# old instead; the trade uses the engine's own client (10 s), reads both books again, and sends
+# nothing if the gap is gone.
+SCAN_MAX_AGE_S = 30
+SCAN_READERS = 4  # matches priced at once
+_scan_client: Client | None = None
+
+
+def scan_client() -> Client:
+    """A reads-only SDK client for the scan: paper mode, an in-memory store, books up to 30 s old."""
+    global _scan_client
+    with _lock:
+        if _scan_client is None:
+            _scan_client = Client(
+                mode="paper",
+                rules={"budget": settings.budget, "max_quote_age_s": SCAN_MAX_AGE_S},
+                store=":memory:",
+                on_alert=lambda e: None,
+                transport=gateway(),  # paced with the engine's own reads (reads.py)
+            )
+        return _scan_client
 
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
@@ -326,7 +363,11 @@ def best_signal(strategy: str = "sports_favorite", q: str | None = None, categor
 def _price(m: Match, side: str, size: int, max_price: float | None = None) -> dict[str, Any]:
     """One order compared on both venues (``client.preview_best``); sends nothing."""
     try:
-        return {"ok": True, **_best_view(m, client().preview_best(m, side, size, max_price=max_price))}
+        r = client().preview_best(m, side, size, max_price=max_price)
+        if any(v.skip == "stale_book" for v in r.why.venues):
+            # Polymarket US's cached book can come back just over 10 s old: read both books once more.
+            r = client().preview_best(m, side, size, max_price=max_price)
+        return {"ok": True, **_best_view(m, r)}
     except VenueError as e:
         return {"ok": False, "error": error_view(e), "error_line": error_line(e)}
 
@@ -386,13 +427,22 @@ class ScanBody(BaseModel):
     min_return_per_day_pct: float = Field(default=0.0, ge=0)
 
 
+class _ScanQuotes:
+    """The scan's quotes: a book read in the last 3 s is reused (the scan sends nothing), and a
+    "too many requests" block is waited out (it runs in the background) instead of dropping markets."""
+
+    def quote(self, pair: Any, **kw: Any) -> Any:
+        with cached_books(wait_out=15.0):
+            return scan_client().quote(pair, **kw)
+
+
 @app.post("/arb/scan")
 def arb_scan(b: ScanBody) -> StreamingResponse:
     ms, over_count = _list(b.q, b.category, b.from_, b.to, b.limit)
     s = ScanSettings(size=b.size, min_edge=b.min_edge, min_return_per_day_pct=b.min_return_per_day_pct)
 
     def lines() -> Iterator[str]:
-        for event in scan(ms, client(), s):
+        for event in scan(ms, _ScanQuotes(), s, readers=SCAN_READERS):
             if event["type"] == "done":
                 event["finished_skipped"] = over_count  # events already over, left out before the scan
             yield json.dumps(event, default=str) + "\n"
@@ -434,11 +484,23 @@ def replay_run(b: ReplayBody) -> dict[str, Any]:
         raise HTTPException(404, str(e)) from e
     except LookupError as e:
         raise HTTPException(422, str(e)) from e
+    except replay.CannotPrice as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @app.post("/arb/trade")
 def arb_trade(b: TradeBody) -> dict[str, Any]:
-    t = client().trade(_find(b.match_id), size=b.size, min_edge=b.min_edge)
+    m = _find(b.match_id)
+    for attempt in (1, 2):
+        try:
+            t = client().trade(m, size=b.size, min_edge=b.min_edge)
+            break
+        except VenueError as e:
+            # A book older than 10 s sends nothing; read both books once more, then say so.
+            if e.code == "stale_quote" and attempt == 1:
+                continue
+            raise HTTPException(409, trade_error(e)) from e
     d = t.to_dict()
     d["quote"] = quote_view(t.quote)
-    return {"mode": settings.mode, **d}
+    # A match Layer flagged as worded differently is traded like any other, and says so with the result.
+    return {"mode": settings.mode, **d, "rule_warning": rule_warning(m)}

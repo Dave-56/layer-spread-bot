@@ -242,8 +242,9 @@ export interface QuoteView {
   as_of: string;
 }
 
+// A rule difference is not a verdict: those matches go through every check and carry
+// match.rule_warning instead.
 export type Verdict =
-  | "rules_differ"
   | "unpriced"
   | "no_offers"
   | "no_gap"
@@ -294,6 +295,10 @@ export interface ReplayResult {
   to: string | null;
   top_of_book_only: boolean;
   size_unknown: boolean;
+  // Sizes in the file are placeholders: the replay priced this many contracts at the top price, and
+  // size_note says so ("Size unknown: assumes 100 contracts at the top price on both venues.").
+  assumed_size: number | null;
+  size_note: string | null;
   match: MatchView;
   settles_at: string | null;
   moments: number;
@@ -312,34 +317,32 @@ export interface TradeResult {
   unwind_loss: number;
   notes: string[];
   quote: QuoteView;
+  rule_warning: string | null;
 }
 
+// Each reason's group name on the Arbitrage screen (components/gaps.ts words the counts).
 export const VERDICT_LABEL: Record<Verdict, string> = {
-  rules_differ: "Worded differently",
-  unpriced: "Couldn't read prices",
+  unpriced: "Couldn't be priced",
   no_offers: "Nobody selling",
   no_gap: "No gap",
   fees: "Fees bigger than the gap",
-  below_min_edge: "Below your minimum",
-  too_thin: "Not enough for sale",
+  below_min_edge: "Under your minimum",
+  too_thin: "Too little for sale",
   no_payout_date: "No payout date",
   per_day_low: "Pays back too slowly",
   survivor: "Still money after fees",
 };
 
-// The same reasons, as a phrase in "No trade: 25 [are worded differently], 19 [have no gap]".
-export const VERDICT_PHRASE: Record<Verdict, string> = {
-  rules_differ: "are worded differently on the two venues",
-  unpriced: "had prices we couldn't read",
-  no_offers: "have nobody selling on one venue",
-  no_gap: "have no gap",
-  fees: "have a gap smaller than the fees",
-  below_min_edge: "are below your minimum",
-  too_thin: "have too little for sale",
-  no_payout_date: "have no payout date",
-  per_day_low: "pay back too slowly",
-  survivor: "are still money after fees",
-};
+/** Survivors in the order to show them: worded the same on both venues first, then most profit
+ *  after fees. A rule difference doesn't drop a gap, but one that could settle differently ranks
+ *  below one that can't. */
+export function survivorOrder<R extends { match: MatchView; quote: QuoteView | null }>(rows: R[]): R[] {
+  return [...rows].sort(
+    (a, b) =>
+      Number(!!a.match.rule_warning) - Number(!!b.match.rule_warning) ||
+      (b.quote?.net_profit ?? 0) - (a.quote?.net_profit ?? 0),
+  );
+}
 
 /** Read a newline-delimited JSON stream, one parsed object per line. */
 export async function* ndjson<T>(body: ReadableStream<Uint8Array>): AsyncGenerator<T> {

@@ -735,7 +735,6 @@ function ManualMode() {
               ))}
             </div>
           </div>
-          <RuleNote text={picked?.rule_warning} />
           <div className="controls" style={{ marginTop: 14 }}>
             <div className="field">
               Side
