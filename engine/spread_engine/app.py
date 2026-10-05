@@ -6,7 +6,8 @@ The web app calls it; nothing else should. It answers only requests from this ma
     GET  /paper/account   the bot's fake account: positions, money at risk, budget
     POST /paper/reset     paper mode only: start the fake account over
     GET  /matches         Layer's matched Kalshi ↔ Polymarket US markets (the one hosted call)
-    GET  /strategies      the strategy files in strategies/ (yours and the examples)
+    GET  /strategies      the strategy files in strategies/ (yours and the examples), by category
+    POST /strategies      add your own strategy file (saved in strategies/, checked that it loads)
     GET  /best/signal     Job 1: run a strategy, then compare its order on both venues
     POST /best/preview    Job 1: compare one order on both venues; sends nothing
     POST /best/buy        Job 1: send it to the cheaper venue (paper unless BOT_MODE=live)
@@ -35,7 +36,7 @@ from uselayer.guardrails import order_risk
 from . import config, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .strategies import upcoming
-from .views import error_view, match_id, match_view, over, rule_warning
+from .views import compare_view, error_view, match_id, match_view, over, rule_warning
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -69,11 +70,40 @@ def client() -> Client:
         return _client
 
 
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+PROXY_HEADER = "x-spread-proxy"  # set by the app's proxy; a cross-site browser request can't add it
+
+
+def _host_name(host: str) -> str:
+    """``127.0.0.1:8765`` → ``127.0.0.1``; ``[::1]:8765`` → ``::1``."""
+    host = host.strip().lower()
+    if host.startswith("["):
+        return host[1 : host.find("]")] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
 @app.middleware("http")
 async def local_only(request: Request, call_next: Any) -> Any:
-    host = request.client.host if request.client else ""
-    if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+    """Only this machine, and only the app (or your own script), may use the engine.
+
+    It places orders and adds strategy files, which run as code. A website open in your browser can
+    reach 127.0.0.1 too, so besides coming from this machine a request must:
+    - name this machine as its Host (a site whose name points at 127.0.0.1 sends its own name), and
+    - for a POST, be JSON and carry ``x-spread-proxy``: a browser won't send either cross-site
+      without asking first, and the engine never says yes.
+    """
+    peer = request.client.host if request.client else ""
+    if peer not in (*LOCAL_HOSTS, "testclient"):
         return JSONResponse({"error": "This engine answers only this machine."}, status_code=403)
+    if _host_name(request.headers.get("host", "")) not in LOCAL_HOSTS:
+        return JSONResponse({"error": "This engine answers only at 127.0.0.1 or localhost."}, status_code=403)
+    if request.method not in ("GET", "HEAD"):
+        if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+            return JSONResponse({"error": "Send JSON (content-type: application/json)."}, status_code=415)
+        if request.headers.get(PROXY_HEADER) != "1":
+            return JSONResponse(
+                {"error": f"Only the app can do that. Scripts: send the header {PROXY_HEADER}: 1."}, status_code=403
+            )
     return await call_next(request)
 
 
@@ -90,10 +120,32 @@ def _remember(ms: list[Match]) -> list[Match]:
 
 
 def _find(mid: str) -> Match:
+    """A match by its Kalshi market id: one seen before, else its Polymarket US twin from Layer's matching."""
     m = _matches.get(mid)
     if m is None:
-        raise HTTPException(404, f"Unknown match {mid}. Load matches first.")
+        try:
+            m = replay.layer_match(client(), mid)
+        except (VenueError, KeyError) as e:
+            raise HTTPException(404, f"Layer has no Polymarket US match for {mid}. Search for the market first.") from e
+        if "kalshi" not in m.markets() or "polymarket_us" not in m.markets():
+            raise HTTPException(404, f"Layer has no Polymarket US match for {mid}. Search for the market first.")
+        _matches[mid] = m
     return m
+
+
+def _list_in(
+    q: str | None, categories: tuple[str, ...] | None, limit: int, *, upcoming_only: bool = False
+) -> tuple[list[Match], int]:
+    """``_list`` for each of several Layer categories (``None``: all), up to ``limit`` each."""
+    if not categories:
+        return _list(q, None, None, None, limit, upcoming_only=upcoming_only)
+    out: list[Match] = []
+    skipped = 0
+    for c in categories:
+        ms, n = _list(q, c, None, None, limit, upcoming_only=upcoming_only)
+        out += ms
+        skipped += n
+    return out, skipped
 
 
 def _list(
@@ -192,27 +244,55 @@ class BestBody(BaseModel):
     max_price: float | None = Field(default=None, gt=0, lt=1)
 
 
-def _best_view(r: Any) -> dict[str, Any]:
-    return r.to_dict()
+def _best_view(m: Match, r: Any) -> dict[str, Any]:
+    """The SDK's BestOrder as it is, plus ``compare``: the same comparison named and labelled for the app."""
+    return {**r.to_dict(), "compare": compare_view(m, r.why)}
 
 
 @app.get("/strategies")
 def list_strategies() -> dict[str, Any]:
-    return {"strategies": strategies.available()}
+    return {"categories": list(strategies.CATEGORIES), "strategies": strategies.available()}
+
+
+@app.get("/strategies/starter")
+def strategy_starter() -> dict[str, Any]:
+    """The starter file (my_strategy.py) to download and make your own. It isn't in the picker."""
+    return {"filename": f"{strategies.STARTER}.py", "code": strategies.starter()}
+
+
+class StrategyFile(BaseModel):
+    filename: str = Field(max_length=60)
+    code: str
+    replace: bool = False
+
+
+@app.post("/strategies")
+def add_strategy(b: StrategyFile) -> dict[str, Any]:
+    """Save your strategy file in strategies/ and check it loads. It runs your own code, on this machine only."""
+    try:
+        added = strategies.add(b.filename, b.code, replace=b.replace)
+    except strategies.BadStrategy as e:
+        raise HTTPException(422, str(e)) from e
+    return {"added": added, "strategies": strategies.available()}
 
 
 @app.get("/best/signal")
-def best_signal(strategy: str = "first_match", q: str | None = None, category: str | None = None, limit: int = 50) -> dict[str, Any]:
+def best_signal(strategy: str = "sports_favorite", q: str | None = None, category: str | None = None, limit: int = 50) -> dict[str, Any]:
     try:
-        decide = strategies.get(strategy)
+        mod = strategies.module(strategy)
     except KeyError as e:
         raise HTTPException(404, str(e)) from e
-    ms, started = _list(q, category, None, None, limit, upcoming_only=True)
-    sig = decide(ms, client())
-    if sig is None:
-        # Nothing fit: list what it looked at, with why each wasn't picked, so any can be compared by hand.
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    cats = (category,) if category else tuple(getattr(mod, "LAYER_CATEGORIES", ()) or ())
+    ms, started = _list_in(q, cats or None, limit, upcoming_only=True)
+    sig = mod.decide(ms, client())
+    if not isinstance(sig, strategies.Signal):
+        # No trade: the strategy's sentence, and what it looked at with why each wasn't picked, so any
+        # can be compared by hand.
+        why = sig.why if isinstance(sig, strategies.NoTrade) else None
         looked = [{**match_view(m), "reason": "rules differ" if m.caveats else "not picked"} for m in ms]
-        return {"signal": None, "matches": len(ms), "started": started, "looked": looked, "best": None}
+        return {"signal": None, "no_trade": f"No trade: {why}" if why else None, "matches": len(ms), "started": started, "looked": looked, "best": None}
     _matches[match_id(sig.match)] = sig.match
     body = BestBody(match_id=match_id(sig.match), side=sig.side, size=sig.size, max_price=sig.max_price)
     return {
@@ -224,8 +304,9 @@ def best_signal(strategy: str = "first_match", q: str | None = None, category: s
 
 def _preview(b: BestBody) -> dict[str, Any]:
     try:
-        r = client().preview_best(_find(b.match_id), b.side, b.size, max_price=b.max_price)
-        return {"ok": True, **_best_view(r)}
+        m = _find(b.match_id)
+        r = client().preview_best(m, b.side, b.size, max_price=b.max_price)
+        return {"ok": True, **_best_view(m, r)}
     except VenueError as e:
         return {"ok": False, "error": error_view(e)}
 
@@ -237,8 +318,9 @@ def best_preview(b: BestBody) -> dict[str, Any]:
 
 @app.post("/best/buy")
 def best_buy(b: BestBody) -> dict[str, Any]:
-    r = client().buy_best(_find(b.match_id), b.side, b.size, max_price=b.max_price)
-    return {"mode": settings.mode, **_best_view(r)}
+    m = _find(b.match_id)
+    r = client().buy_best(m, b.side, b.size, max_price=b.max_price)
+    return {"mode": settings.mode, **_best_view(m, r)}
 
 
 class ScanBody(BaseModel):

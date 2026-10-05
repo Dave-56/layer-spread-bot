@@ -27,9 +27,11 @@ export interface MatchView {
   event_time: string | null;
   confidence: number | null;
   caveats: string[];
-  // Layer flagged a rule difference: one plain sentence to show wherever the match is shown, e.g.
-  // "Worded differently: different data source. The two could settle differently." null when none.
+  // Layer flagged a rule difference, as one sentence to show with the match, e.g. "Worded differently:
+  // different data source. The two could settle differently." null when none.
   rule_warning: string | null;
+  // The same for every outcome of one game or event: group search results by it.
+  event_key: string | null;
   kalshi: MarketView;
   polymarket_us: MarketView;
 }
@@ -109,16 +111,69 @@ export interface BestResult {
   sent?: boolean;
   order?: OrderView | null;
   why?: BestVenue;
+  compare?: CompareView;
   preview?: PreviewView | null;
   mode?: string;
+}
+
+// Best venue, named and labelled for the screen (engine/spread_engine/views.py compare_view). Every
+// number is the SDK's; the labels are the engine's. Show them as they are.
+export interface PairView {
+  kalshi: { title: string | null; outcome: string | null; question: string | null; ticker: string; url: string | null };
+  polymarket_us: { title: string | null; outcome: string | null; question: string | null; slug: string; url: string | null };
+  note: string; // "Layer matched these as the same bet (95% confidence)." (+ the rule warning, if any)
+  confidence: number | null;
+  rule_warning: string | null;
+}
+
+export interface VenueRow {
+  venue: Venue;
+  venue_name: string;
+  market: string;
+  ok: boolean;
+  cheaper: boolean;
+  skip: string | null;
+  skip_reason: string | null; // "best price above your max. The best ask is 0.98, above max_price 0.97."
+  price: number | null; // best ask for the side bought, in dollars
+  price_label: string | null; // "54¢"
+  chance_label: string | null; // "54%": the chance the market gives that side
+  avg_price: number | null;
+  avg_price_label: string | null;
+  limit_price: number | null;
+  fees: number | null;
+  fillable: number | null; // whole contracts on offer at or under the price it would pay
+  total_cost: number | null; // cost + fees for the whole order
+  total_cost_per_contract: number | null;
+}
+
+export interface CompareView {
+  action: "buy" | "sell";
+  side: "yes" | "no";
+  size: number;
+  max_price: number | null;
+  pair: PairView;
+  venues: VenueRow[];
+  cheaper: Venue | null;
+  cheaper_name: string | null;
+  saving: number | null; // dollars, for this size, vs the other venue
+  saving_label: string | null; // "$0.97"
+  verdict: string; // "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
+  as_of: string;
 }
 
 // A file in engine/spread_engine/strategies/.
 export interface StrategyInfo {
   id: string;
   name: string;
+  category: string; // one of StrategyList.categories
   description: string;
   example: boolean;
+  error: string | null; // the file didn't load: one line why (it can't be run)
+}
+
+export interface StrategyList {
+  categories: string[]; // "Sports", "Crypto", "News, politics & economics", "Your own"
+  strategies: StrategyInfo[];
 }
 
 export interface Signal {
@@ -308,7 +363,8 @@ export async function engine<T>(path: string, init?: { method?: string; body?: u
   try {
     res = await fetch(ENGINE_URL + path, {
       method: init?.method ?? "GET",
-      headers: init?.body === undefined ? undefined : { "content-type": "application/json" },
+      // The engine refuses a POST without JSON and the proxy header (see lib/guard.ts).
+      headers: init?.body === undefined ? { "x-spread-proxy": "1" } : { "content-type": "application/json", "x-spread-proxy": "1" },
       body: init?.body === undefined ? undefined : JSON.stringify(init.body),
       cache: "no-store",
     });

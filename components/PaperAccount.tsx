@@ -42,14 +42,16 @@ export default function PaperAccount() {
 
   async function reset() {
     setBusy(true);
-    const r = await fetch("/engine/paper/reset", { method: "POST" });
+    const r = await fetch("/engine/paper/reset", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     if (r.ok) setAcct((await r.json()) as Account);
     setBusy(false);
     window.dispatchEvent(new Event("spread:reset"));
   }
 
+  // An empty paper account says nothing worth reading: it appears once there's a trade.
   if (!acct) return null;
   const paper = acct.mode === "paper";
+  if (paper && !acct.positions.length && !acct.open_orders) return null;
   return (
     <div className="account small">
       <span>

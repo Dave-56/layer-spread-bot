@@ -155,7 +155,7 @@ async function scanArbitrage(raw: unknown): Promise<ToolOutput> {
   const a = scanInput.parse(raw);
   const res = await fetch(`${ENGINE_URL}/arb/scan`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-spread-proxy": "1" },
     body: JSON.stringify({
       q: a.search,
       category: a.category,
