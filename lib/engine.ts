@@ -348,7 +348,8 @@ export async function engine<T>(path: string, init?: { method?: string; body?: u
   try {
     res = await fetch(ENGINE_URL + path, {
       method: init?.method ?? "GET",
-      headers: init?.body === undefined ? undefined : { "content-type": "application/json" },
+      // The engine refuses a POST without JSON and the proxy header (see lib/guard.ts).
+      headers: init?.body === undefined ? { "x-spread-proxy": "1" } : { "content-type": "application/json", "x-spread-proxy": "1" },
       body: init?.body === undefined ? undefined : JSON.stringify(init.body),
       cache: "no-store",
     });

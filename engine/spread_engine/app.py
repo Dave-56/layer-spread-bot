@@ -70,11 +70,40 @@ def client() -> Client:
         return _client
 
 
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+PROXY_HEADER = "x-spread-proxy"  # set by the app's proxy; a cross-site browser request can't add it
+
+
+def _host_name(host: str) -> str:
+    """``127.0.0.1:8765`` → ``127.0.0.1``; ``[::1]:8765`` → ``::1``."""
+    host = host.strip().lower()
+    if host.startswith("["):
+        return host[1 : host.find("]")] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
 @app.middleware("http")
 async def local_only(request: Request, call_next: Any) -> Any:
-    host = request.client.host if request.client else ""
-    if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+    """Only this machine, and only the app (or your own script), may use the engine.
+
+    It places orders and adds strategy files, which run as code. A website open in your browser can
+    reach 127.0.0.1 too, so besides coming from this machine a request must:
+    - name this machine as its Host (a site whose name points at 127.0.0.1 sends its own name), and
+    - for a POST, be JSON and carry ``x-spread-proxy``: a browser won't send either cross-site
+      without asking first, and the engine never says yes.
+    """
+    peer = request.client.host if request.client else ""
+    if peer not in (*LOCAL_HOSTS, "testclient"):
         return JSONResponse({"error": "This engine answers only this machine."}, status_code=403)
+    if _host_name(request.headers.get("host", "")) not in LOCAL_HOSTS:
+        return JSONResponse({"error": "This engine answers only at 127.0.0.1 or localhost."}, status_code=403)
+    if request.method not in ("GET", "HEAD"):
+        if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+            return JSONResponse({"error": "Send JSON (content-type: application/json)."}, status_code=415)
+        if request.headers.get(PROXY_HEADER) != "1":
+            return JSONResponse(
+                {"error": f"Only the app can do that. Scripts: send the header {PROXY_HEADER}: 1."}, status_code=403
+            )
     return await call_next(request)
 
 

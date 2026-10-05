@@ -42,7 +42,7 @@ export default function PaperAccount() {
 
   async function reset() {
     setBusy(true);
-    const r = await fetch("/engine/paper/reset", { method: "POST" });
+    const r = await fetch("/engine/paper/reset", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     if (r.ok) setAcct((await r.json()) as Account);
     setBusy(false);
     window.dispatchEvent(new Event("spread:reset"));
