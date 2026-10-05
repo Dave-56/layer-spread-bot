@@ -2,7 +2,7 @@
 // This app only shows what it returns. The browser reaches it through /engine/* (app/engine), and
 // the chat's tools call it directly from the server.
 
-export const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:8765";
+export const ENGINE_URL = process.env.ENGINE_URL ?? `http://127.0.0.1:${process.env.ENGINE_PORT ?? 8765}`;
 
 export type Venue = "kalshi" | "polymarket_us";
 export const VENUE_NAME: Record<string, string> = { kalshi: "Kalshi", polymarket_us: "Polymarket US" };
@@ -110,6 +110,14 @@ export interface BestResult {
   mode?: string;
 }
 
+// A file in engine/spread_engine/strategies/.
+export interface StrategyInfo {
+  id: string;
+  name: string;
+  description: string;
+  example: boolean;
+}
+
 export interface Signal {
   match_id: string;
   side: "yes" | "no";
@@ -175,7 +183,7 @@ export interface ScanRow {
 export type ScanEvent =
   | { type: "start"; total: number }
   | ScanRow
-  | { type: "done"; total: number; counts: Record<Verdict, number> }
+  | { type: "done"; total: number; counts: Record<Verdict, number>; finished_skipped?: number }
   | { type: "error"; error: EngineError };
 
 export interface TradeResult {
@@ -189,16 +197,30 @@ export interface TradeResult {
 }
 
 export const VERDICT_LABEL: Record<Verdict, string> = {
-  rules_differ: "Rules differ",
-  unpriced: "Couldn't price",
-  no_offers: "No offers",
+  rules_differ: "Worded differently",
+  unpriced: "Couldn't read prices",
+  no_offers: "Nobody selling",
   no_gap: "No gap",
-  fees: "Fees ate the gap",
+  fees: "Fees bigger than the gap",
   below_min_edge: "Below your minimum",
-  too_thin: "Too thin",
+  too_thin: "Not enough for sale",
   no_payout_date: "No payout date",
-  per_day_low: "Return per day too low",
-  survivor: "Survivor",
+  per_day_low: "Pays back too slowly",
+  survivor: "Still money after fees",
+};
+
+// The same reasons, as a phrase in "No trade: 25 [are worded differently], 19 [have no gap]".
+export const VERDICT_PHRASE: Record<Verdict, string> = {
+  rules_differ: "are worded differently on the two venues",
+  unpriced: "had prices we couldn't read",
+  no_offers: "have nobody selling on one venue",
+  no_gap: "have no gap",
+  fees: "have a gap smaller than the fees",
+  below_min_edge: "are below your minimum",
+  too_thin: "have too little for sale",
+  no_payout_date: "have no payout date",
+  per_day_low: "pay back too slowly",
+  survivor: "are still money after fees",
 };
 
 /** Read a newline-delimited JSON stream, one parsed object per line. */

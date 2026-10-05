@@ -5,6 +5,7 @@ import {
   errorText,
   ndjson,
   VERDICT_LABEL,
+  VERDICT_PHRASE,
   type QuoteView,
   type ScanEvent,
   type ScanRow,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/engine";
 import { MatchLine } from "./BestVenue";
 import { cents, count, money, pct, side, when } from "./format";
+import { traded } from "./PaperAccount";
 
 // Job 2: scan matched markets for the same bet priced differently on the two venues, and show
 // what happened to every gap: dropped with a plain reason, or a survivor that's still money after
@@ -36,6 +38,7 @@ export interface FunnelState {
   counts: Partial<Record<Verdict, number>>;
   rows: ScanRow[];
   done: boolean;
+  finishedSkipped?: number;
 }
 
 export function FunnelBars({ f }: { f: FunnelState }) {
@@ -43,7 +46,7 @@ export function FunnelBars({ f }: { f: FunnelState }) {
   return (
     <div className="funnel">
       <div className="step">
-        <span>Matched markets scanned</span>
+        <span>Markets checked</span>
         <i style={{ width: "100%" }} />
         <em>
           {seen}
@@ -55,7 +58,7 @@ export function FunnelBars({ f }: { f: FunnelState }) {
         if (!n && v !== "survivor") return null;
         return (
           <div key={v} className={`step ${v === "survivor" ? "survivor" : ""}`}>
-            <span>{v === "survivor" ? "Still money after all of it" : `Dropped: ${VERDICT_LABEL[v].toLowerCase()}`}</span>
+            <span>{VERDICT_LABEL[v]}</span>
             <i style={{ width: n ? `${Math.max(2, (n / Math.max(1, seen)) * 100)}%` : 0 }} />
             <em>{n}</em>
           </div>
@@ -156,6 +159,7 @@ function Survivor({ row, size, mode }: { row: ScanRow; size: number; mode: "pape
       const body = await r.json().catch(() => null);
       if (!r.ok) throw new Error(errorText(body, r.status));
       setTrade(body as TradeResult);
+      traded();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -164,7 +168,7 @@ function Survivor({ row, size, mode }: { row: ScanRow; size: number; mode: "pape
 
   return (
     <div className="box good">
-      <div className="label">Survivor</div>
+      <div className="label">Still money after fees</div>
       <b>{row.match.outcome ?? row.match.title}</b>
       <MatchLine m={row.match} />
       <Legs q={q} />
@@ -172,20 +176,38 @@ function Survivor({ row, size, mode }: { row: ScanRow; size: number; mode: "pape
       {row.reason && <p className="small muted">{row.reason}</p>}
       <div className="row" style={{ marginTop: 10 }}>
         <button className="btn" onClick={go} disabled={busy}>
-          {busy ? "Sending…" : mode === "live" ? "Send LIVE orders, both legs" : "Paper-trade both legs"}
+          {busy ? "Sending…" : mode === "live" ? "Buy both sides (real money)" : "Paper-trade both sides"}
         </button>
-        <span className="small muted">Both books are read again first; if the gap is gone, nothing is sent.</span>
+        <span className="small muted">Prices are checked again first. If the gap is gone, nothing is bought.</span>
       </div>
       {error && <p className="error">{error}</p>}
       {trade && (
         <p className="small" style={{ marginTop: 10 }}>
           <b>{trade.status}</b>: {count(trade.hedged)} contracts hedged, {money(trade.locked_in)} locked in after fees
           {trade.unwind_loss ? `, unwind cost ${money(trade.unwind_loss)}` : ""}.{" "}
-          {trade.status === "missed" ? "Fees say no trade: the gap closed before the orders." : ""}
+          {trade.status === "missed" ? "No trade: the gap closed before the orders." : ""}
         </p>
       )}
     </div>
   );
+}
+
+/** Why a scan found nothing, in one plain sentence: the biggest reasons, largest first. */
+export function noTradeLine(f: FunnelState): string {
+  const n = f.rows.length;
+  if (!n)
+    return f.finishedSkipped
+      ? `No trade: all ${f.finishedSkipped} events were already over.`
+      : "No trade: no matched markets for that search.";
+  const parts = ORDER.filter((v) => v !== "survivor")
+    .map((v) => ({ v, k: f.rows.filter((r) => r.verdict === v).length }))
+    .filter((x) => x.k)
+    .sort((a, b) => b.k - a.k);
+  if (parts.length === 1) return `No trade: all ${n} ${VERDICT_PHRASE[parts[0].v]}.`;
+  const named = parts.slice(0, 3).map((x) => `${x.k} ${VERDICT_PHRASE[x.v]}`);
+  const rest = parts.slice(3).reduce((t, x) => t + x.k, 0);
+  if (rest) named.push(`${rest} for other reasons`);
+  return `No trade: of ${n} markets, ${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}.`;
 }
 
 export function FunnelResult({ f, size, mode }: { f: FunnelState; size: number; mode: "paper" | "live" }) {
@@ -200,28 +222,17 @@ export function FunnelResult({ f, size, mode }: { f: FunnelState; size: number; 
       {survivors.map((r) => (
         <Survivor key={r.match.id} row={r} size={size} mode={mode} />
       ))}
-      {f.done && !survivors.length && (
-        <div className="box">
-          <b>No trade.</b> Nothing is money after fees, rules and depth right now.
-          {dropped[0]?.quote && (
-            <span className="muted">
-              {" "}
-              Closest: {dropped[0].match.outcome ?? dropped[0].match.title}, {cents(dropped[0].quote.edge_at_best)} a contract after
-              fees ({VERDICT_LABEL[dropped[0].verdict].toLowerCase()}).
-            </span>
-          )}
-        </div>
-      )}
+      {f.done && !survivors.length && <p>{noTradeLine(f)}</p>}
       {closest.length > 0 && (
         <>
-          <h3>Closest gaps that didn&apos;t make it</h3>
+          <h3>Closest gaps</h3>
           <DroppedTable rows={closest} />
         </>
       )}
       {f.done && dropped.length > 0 && (
         <details>
           <summary className="small muted" style={{ cursor: "pointer" }}>
-            All {dropped.length} dropped, by reason
+            All {dropped.length}, by reason
           </summary>
           {ORDER.filter((v) => v !== "survivor").map((v) => {
             const rows = dropped.filter((r) => r.verdict === v);
@@ -267,7 +278,7 @@ function Live({ mode }: { mode: "paper" | "live" }) {
         if (run.current !== id) return;
         if (e.type === "start") setF((s) => s && { ...s, total: e.total });
         if (e.type === "row") setF((s) => s && { ...s, rows: [...s.rows, e] });
-        if (e.type === "done") setF((s) => s && { ...s, counts: e.counts, done: true });
+        if (e.type === "done") setF((s) => s && { ...s, counts: e.counts, done: true, finishedSkipped: e.finished_skipped });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -283,15 +294,15 @@ function Live({ mode }: { mode: "paper" | "live" }) {
           <input className="wide" value={q} placeholder="e.g. nfl (blank: all)" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && scan()} />
         </label>
         <label className="field">
-          Contracts a leg
+          Contracts
           <input type="number" min={1} value={size} onChange={(e) => setSize(Math.max(1, +e.target.value || 1))} />
         </label>
         <label className="field">
-          Min after fees (¢)
+          Min profit (¢ each)
           <input type="number" min={0} step={0.1} value={minEdge} onChange={(e) => setMinEdge(Math.max(0, +e.target.value || 0))} />
         </label>
         <label className="field">
-          Min return/day (%)
+          Min profit a day (%)
           <input type="number" min={0} step={0.01} value={minPerDay} onChange={(e) => setMinPerDay(Math.max(0, +e.target.value || 0))} />
         </label>
         <label className="field">
@@ -304,7 +315,7 @@ function Live({ mode }: { mode: "paper" | "live" }) {
       </div>
       {busy && f && (
         <div className="status">
-          <span className="dot" /> Reading both venues&apos; books: {f.rows.length} of {f.total || "…"}
+          <span className="dot" /> Checking prices: {f.rows.length} of {f.total || "…"}
         </div>
       )}
       {error && <p className="error">{error}</p>}
@@ -329,12 +340,6 @@ export default function Arbitrage({ mode }: { mode: "paper" | "live" }) {
   const [view, setView] = useState<"live" | "replay">("live");
   return (
     <section>
-      <h2>Arbitrage</h2>
-      <p className="lead">
-        The same bet, priced differently on Kalshi and Polymarket US. Buying YES on one and NO on the other pays $1 a
-        contract either way, so a gap is money only if it&apos;s still there after both venues&apos; fees, the rules
-        match and the books are deep enough. Most gaps aren&apos;t. Here&apos;s what happened to each one.
-      </p>
       <div className="switch" role="tablist">
         <button className={view === "live" ? "current" : ""} onClick={() => setView("live")}>
           Live

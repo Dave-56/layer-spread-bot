@@ -12,3 +12,4 @@ __pycache__/
 .claude/
 next-env.d.ts
 *.tsbuildinfo
+recordings/

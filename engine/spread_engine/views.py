@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from uselayer import Match, VenueError
@@ -43,6 +44,21 @@ def match_view(m: Match) -> dict[str, Any]:
         "kalshi": market_view(k),
         "polymarket_us": market_view(u),
     }
+
+
+def _time(t: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(t.replace("Z", "+00:00")) if t else None
+    except ValueError:
+        return None
+
+
+def over(m: Match, now: datetime | None = None) -> bool:
+    """The event is over: a venue's market has closed, or it started more than 12 hours ago."""
+    now = now or datetime.now(UTC)
+    closes = [t for t in (_time(m.kalshi.close_time), _time(m.polymarket_us.close_time)) if t]
+    starts = [t for t in (_time(m.kalshi.event_time), _time(m.polymarket_us.event_time)) if t]
+    return any(t < now for t in closes) or any(t < now - timedelta(hours=12) for t in starts)
 
 
 def error_view(e: Exception) -> dict[str, Any]:

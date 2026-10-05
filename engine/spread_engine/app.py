@@ -3,8 +3,11 @@
 The web app calls it; nothing else should. It answers only requests from this machine.
 
     GET  /status          mode, which keys are set (yes/no only), SDK version
+    GET  /paper/account   the bot's fake account: positions, money at risk, budget
+    POST /paper/reset     paper mode only: start the fake account over
     GET  /matches         Layer's matched Kalshi ↔ Polymarket US markets (the one hosted call)
-    GET  /best/signal     Job 1: run your strategy, then compare its order on both venues
+    GET  /strategies      the strategy files in strategies/ (yours and the examples)
+    GET  /best/signal     Job 1: run a strategy, then compare its order on both venues
     POST /best/preview    Job 1: compare one order on both venues; sends nothing
     POST /best/buy        Job 1: send it to the cheaper venue (paper unless BOT_MODE=live)
     POST /arb/scan        Job 2: the funnel, streamed as newline-delimited JSON
@@ -17,6 +20,7 @@ import json
 import threading
 from collections import deque
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import uselayer
@@ -24,10 +28,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from uselayer import Client, Match, VenueError
+from uselayer.guardrails import order_risk
 
-from . import config, strategy
+from . import config, strategies
 from .funnel import ScanSettings, quote_view, scan
-from .views import error_view, match_id, match_view
+from .strategies import upcoming
+from .views import error_view, match_id, match_view, over
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -44,8 +50,7 @@ def client() -> Client:
     global _client, _client_error
     with _lock:
         if _client is None:
-            if settings.store_dir:
-                settings.store_dir.mkdir(parents=True, exist_ok=True)
+            settings.store_dir.mkdir(parents=True, exist_ok=True)
             try:
                 _client = Client(
                     mode=settings.mode,  # type: ignore[arg-type]
@@ -89,9 +94,27 @@ def _find(mid: str) -> Match:
     return m
 
 
-def _list(q: str | None, category: str | None, from_: str | None, to: str | None, limit: int) -> list[Match]:
-    ms = client().matches(venue="polymarket_us", q=q or None, category=category or None, from_=from_ or None, to=to or None, limit=limit)
-    return _remember(ms)
+def _list(
+    q: str | None, category: str | None, from_: str | None, to: str | None, limit: int, *, upcoming_only: bool = False
+) -> tuple[list[Match], int]:
+    """``limit`` current matches (not over; with ``upcoming_only``, not started either), and how many
+    were skipped as started or over. Layer lists started and finished events too, so this pages on
+    (up to 5 pages of 200) instead of filtering one short page."""
+    keep: list[Match] = []
+    skipped = 0
+    for page in range(5):
+        ms = client().matches(
+            venue="polymarket_us", q=q or None, category=category or None, from_=from_ or None, to=to or None,
+            limit=200, offset=page * 200,
+        )
+        for m in ms:
+            if over(m) or (upcoming_only and not upcoming(m)):
+                skipped += 1
+            elif len(keep) < limit:
+                keep.append(m)
+        if len(keep) >= limit or len(ms) < 200:
+            break
+    return _remember(keep), skipped
 
 
 @app.get("/status")
@@ -110,11 +133,54 @@ def status() -> dict[str, Any]:
     }
 
 
+@app.get("/paper/account")
+def paper_account() -> dict[str, Any]:
+    """The bot's own fake account: open positions, money at risk (as the budget rule counts it), budget."""
+    c = client()
+    positions = [p for p in c.positions() if getattr(p, "contracts", 0)]
+    open_orders = c.orders(open=True)
+    at_risk = sum(p.cost + max(p.fees, 0.0) for p in positions) + sum(order_risk(o) for o in open_orders)
+    return {
+        "mode": settings.mode,
+        "store": str(settings.store),
+        "budget": settings.budget,
+        "at_risk": round(at_risk, 2),
+        "open_orders": len(open_orders),
+        "positions": [
+            {
+                "venue": p.venue,
+                "market": p.market,
+                "side": p.side,
+                "contracts": p.contracts,
+                "avg_price": p.avg_price,
+                "cost": round(p.cost + max(p.fees, 0.0), 2),
+            }
+            for p in positions
+        ],
+    }
+
+
+@app.post("/paper/reset")
+def paper_reset() -> dict[str, Any]:
+    """Paper mode only: delete the bot's fake account and start a fresh one."""
+    global _client
+    if settings.mode != "paper":
+        raise HTTPException(403, "Only the paper account can be reset.")
+    with _lock:
+        if _client is not None:
+            _client.close()
+            _client = None
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{settings.store}{suffix}").unlink(missing_ok=True)
+    _matches.clear()
+    return paper_account()
+
+
 @app.get("/matches")
 def matches(
     q: str | None = None, category: str | None = None, from_: str | None = None, to: str | None = None, limit: int = 20
 ) -> dict[str, Any]:
-    return {"matches": [match_view(m) for m in _list(q, category, from_, to, limit)]}
+    return {"matches": [match_view(m) for m in _list(q, category, from_, to, limit)[0]]}
 
 
 class BestBody(BaseModel):
@@ -128,12 +194,23 @@ def _best_view(r: Any) -> dict[str, Any]:
     return r.to_dict()
 
 
+@app.get("/strategies")
+def list_strategies() -> dict[str, Any]:
+    return {"strategies": strategies.available()}
+
+
 @app.get("/best/signal")
-def best_signal(q: str | None = None, category: str | None = None, limit: int = 50) -> dict[str, Any]:
-    ms = _list(q, category, None, None, limit)
-    sig = strategy.decide(ms, client())
+def best_signal(strategy: str = "first_match", q: str | None = None, category: str | None = None, limit: int = 50) -> dict[str, Any]:
+    try:
+        decide = strategies.get(strategy)
+    except KeyError as e:
+        raise HTTPException(404, str(e)) from e
+    ms, started = _list(q, category, None, None, limit, upcoming_only=True)
+    sig = decide(ms, client())
     if sig is None:
-        return {"signal": None, "matches": len(ms), "best": None}
+        # Nothing fit: list what it looked at, with why each wasn't picked, so any can be compared by hand.
+        looked = [{**match_view(m), "reason": "rules differ" if m.caveats else "not picked"} for m in ms]
+        return {"signal": None, "matches": len(ms), "started": started, "looked": looked, "best": None}
     _matches[match_id(sig.match)] = sig.match
     body = BestBody(match_id=match_id(sig.match), side=sig.side, size=sig.size, max_price=sig.max_price)
     return {
@@ -175,11 +252,13 @@ class ScanBody(BaseModel):
 
 @app.post("/arb/scan")
 def arb_scan(b: ScanBody) -> StreamingResponse:
-    ms = _list(b.q, b.category, b.from_, b.to, b.limit)
+    ms, over_count = _list(b.q, b.category, b.from_, b.to, b.limit)
     s = ScanSettings(size=b.size, min_edge=b.min_edge, min_return_per_day_pct=b.min_return_per_day_pct)
 
     def lines() -> Iterator[str]:
         for event in scan(ms, client(), s):
+            if event["type"] == "done":
+                event["finished_skipped"] = over_count  # events already over, left out before the scan
             yield json.dumps(event, default=str) + "\n"
 
     return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"cache-control": "no-store"})

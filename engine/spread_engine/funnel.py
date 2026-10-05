@@ -113,46 +113,46 @@ def judge(m: Match, client: Quoter, s: ScanSettings) -> dict[str, Any]:
 
     # Checked before any book is read: most of a scan's time is reading books.
     if s.skip_rule_differences and m.caveats:
-        return drop("rules_differ", "Rules differ: " + ", ".join(CAVEATS.get(c, c) for c in m.caveats) + ".")
+        return drop("rules_differ", "The venues word this bet differently (" + ", ".join(CAVEATS.get(c, c) for c in m.caveats) + "), so they could pay out differently.")
 
     try:
         q = client.quote(m, size=s.size, min_edge=s.min_edge)
     except VenueError as e:
-        return drop("unpriced", "Couldn't price it: " + error_view(e)["message"])
+        return drop("unpriced", "Couldn't read the prices: " + error_view(e)["message"])
     row["quote"] = quote_view(q)
 
     if q.a is None or q.b is None or q.gross_at_best is None or q.edge_at_best is None:
-        return drop("no_offers", "No offers on one venue, so there's nothing to buy on one side.")
+        return drop("no_offers", "Nobody is selling on one venue.")
     gross, edge = q.gross_at_best, q.edge_at_best
     if gross <= 0:
         return drop(
             "no_gap",
-            f"No gap: YES on one venue and NO on the other cost {cents(1 - gross)} together, before fees.",
+            f"No gap: both sides together cost {cents(1 - gross)}, before fees.",
         )
     if edge <= 0:
         return drop(
             "fees",
-            f"Fees are bigger than the gap: {cents(gross)} a contract before fees, {cents(edge)} after.",
+            f"The fees are bigger than the gap: {cents(gross)} a contract before fees, {cents(edge)} after.",
         )
     if edge <= s.min_edge:
         return drop(
             "below_min_edge",
-            f"{cents(edge)} a contract after fees is below your minimum of {cents(s.min_edge)}.",
+            f"{cents(edge)} a contract after fees, under your minimum of {cents(s.min_edge)}.",
         )
     if q.contracts < 1:
-        return drop("too_thin", "Too thin: the books can't fill one contract that clears your minimum.")
+        return drop("too_thin", "Not enough for sale to buy even one contract at a profit.")
     if s.min_return_per_day_pct > 0:
         if q.return_per_day_pct is None:
-            return drop("no_payout_date", "Neither venue gives a payout date, so there's no return per day.")
+            return drop("no_payout_date", "Neither venue says when it pays out.")
         if q.return_per_day_pct < s.min_return_per_day_pct:
             return drop(
                 "per_day_low",
-                f"Return per day {q.return_per_day_pct:.3f}% is below your minimum of "
+                f"Pays back too slowly: {q.return_per_day_pct:.3f}% a day, under your minimum of "
                 f"{s.min_return_per_day_pct:g}% ({q.return_pct:.2f}% over {q.days_held:g} days).",
             )
     row["verdict"] = "survivor"
     if q.contracts < s.size:
-        row["reason"] = f"Only {q.contracts} of {s.size} contracts clear: {q.limited_by}."
+        row["reason"] = f"Only {q.contracts} of {s.size} contracts are still a profit."
     return row
 
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Arbitrage from "@/components/Arbitrage";
 import BestVenue from "@/components/BestVenue";
 import Chat from "@/components/Chat";
+import PaperAccount from "@/components/PaperAccount";
 import type { Status } from "@/lib/engine";
 
 type Tab = "best" | "arb";
@@ -34,10 +35,19 @@ export default function Page() {
     <>
       <header className="header">
         <div className="brand">
-          Spread <span className="brand-tag">an example bot on uselayer</span>
+          Spread{" "}
+          <span className="brand-tag">
+            an example bot on <a href="https://uselayer.sh">uselayer</a>
+          </span>
         </div>
         <div className="header-actions">
-          <span>Kalshi · Polymarket US</span>
+          <span
+            className="info"
+            title="Runs on your computer with your own keys. Layer finds which markets are the same bet; prices and orders go straight to each venue. Prices are a snapshot and can move before an order lands."
+          >
+            ⓘ
+          </span>
+          <span className="venues-label">Kalshi · Polymarket US</span>
           <span className={`mode ${mode === "live" ? "live" : ""}`} title={mode === "live" ? "Orders are real, with your own keys" : "Real books, fake money"}>
             {mode === "live" ? "LIVE" : "Paper"}
           </span>
@@ -73,12 +83,13 @@ export default function Page() {
               </button>
             </nav>
 
+            <PaperAccount />
+
             {tab === "best" ? <BestVenue mode={mode} /> : <Arbitrage mode={mode} />}
 
             <p className="small muted" style={{ marginTop: 40 }}>
-              Runs on your machine. Layer finds which markets are the same bet; prices, books, fees and orders run in the{" "}
-              <a href="https://pypi.org/project/uselayer/">uselayer</a> SDK with your own keys
-              {status ? ` (v${status.sdk_version})` : ""}.
+              Built on <a href="https://uselayer.sh">uselayer.sh</a> ·{" "}
+              <a href="https://pypi.org/project/uselayer/">uselayer{status ? ` ${status.sdk_version}` : ""} on PyPI</a>
             </p>
           </div>
         </main>

@@ -24,12 +24,13 @@ for name in (".env.local", ".env"):
 class Settings:
     mode: str  # "paper" (default) or "live"
     budget: float  # $ at risk across everything at once (the SDK's budget guardrail)
-    # None: the SDK's own store (~/.uselayer/<mode>.db), which `python -m uselayer kill` acts on.
-    store_dir: Path | None
+    # The bot's own store (default ~/.uselayer/spread-bot/), kept apart from any other uselayer use on
+    # this machine, so resetting the paper account touches only the bot's fake trades.
+    store_dir: Path
 
     @property
-    def store(self) -> Path | None:
-        return self.store_dir / f"{self.mode}.db" if self.store_dir else None
+    def store(self) -> Path:
+        return self.store_dir / f"{self.mode}.db"
 
     @property
     def keys(self) -> dict[str, bool]:
@@ -50,6 +51,5 @@ def load() -> Settings:
     # Live is opt-in: only the exact word "live" turns it on. Anything else is paper.
     mode = "live" if os.environ.get("BOT_MODE", "paper").strip().lower() == "live" else "paper"
     budget = float(os.environ.get("BOT_BUDGET", "100"))
-    raw = os.environ.get("BOT_STORE_DIR")
-    store_dir = Path(raw).expanduser() if raw else None
+    store_dir = Path(os.environ.get("BOT_STORE_DIR") or "~/.uselayer/spread-bot").expanduser()
     return Settings(mode=mode, budget=budget, store_dir=store_dir)

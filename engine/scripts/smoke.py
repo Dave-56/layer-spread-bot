@@ -14,7 +14,11 @@ import os
 import sys
 import time
 
+import tempfile  # noqa: E402
+
 os.environ["BOT_MODE"] = "paper"  # this script never runs live, whatever .env says
+# Its own throwaway paper account, so smoke trades never land in yours.
+os.environ["BOT_STORE_DIR"] = tempfile.mkdtemp(prefix="spread-smoke-")
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -42,6 +42,29 @@ def test_answers_only_this_machine(engine) -> None:  # noqa: ANN001
     assert remote.get("/status").status_code == 403
 
 
+def test_paper_account_starts_empty_and_resets(engine, tmp_path) -> None:  # noqa: ANN001
+    c = TestClient(engine.app)
+    acct = c.get("/paper/account").json()
+    assert acct == {**acct, "at_risk": 0, "positions": [], "budget": 100.0}
+    assert acct["store"].startswith(str(tmp_path))  # the test's own store, never the user's
+    assert c.post("/paper/reset").json()["at_risk"] == 0
+
+
+def test_reset_is_paper_only(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # noqa: ANN001
+    from spread_engine import config
+
+    monkeypatch.setenv("BOT_MODE", "live")
+    monkeypatch.setenv("BOT_STORE_DIR", str(tmp_path))
+    from spread_engine import app as module
+
+    module.settings = config.load()
+    try:
+        assert TestClient(module.app).post("/paper/reset").status_code == 403
+    finally:
+        monkeypatch.setenv("BOT_MODE", "paper")
+        module.settings = config.load()
+
+
 def test_unknown_match_is_a_clear_404(engine) -> None:  # noqa: ANN001
     r = TestClient(engine.app).post("/best/preview", json={"match_id": "KXNOPE", "side": "yes", "size": 10})
     assert r.status_code == 404 and "Load matches first" in r.json()["detail"]

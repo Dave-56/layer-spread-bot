@@ -4,7 +4,7 @@ With uselayer, your trading bot keeps its own strategy and gains two abilities: 
 
 Spread runs on your machine, with your own keys, across **Kalshi** and **Polymarket US**. It has two screens:
 
-- **Best venue.** Your strategy decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it sends the order to the cheaper one.
+- **Best venue.** Your strategy (or you, by hand) decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it sends the order to the cheaper one.
 - **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: the rules differ, a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see gross spread → fees → net → return per day, and you can paper-trade both legs.
 
 An optional chat panel answers the same questions in plain English, with your own LLM key.
@@ -35,7 +35,7 @@ cp .env.example .env       # then fill in your keys (below)
 npm run dev                # starts the engine and the app together
 ```
 
-Open http://127.0.0.1:3200.
+Open http://127.0.0.1:3200. Ports in use? `ENGINE_PORT=8775 WEB_PORT=3210 npm run dev`.
 
 Keys in `.env`:
 
@@ -46,6 +46,28 @@ Keys in `.env`:
 | `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` | Live orders only. Paper mode reads Polymarket US's public books without a key. | polymarket.us/developer |
 | `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | The optional chat panel | console.anthropic.com, or openrouter.ai |
 
+## Add your strategy
+
+Your strategy decides the trade; the bot finds the cheaper venue for it. Each strategy is one file in `engine/spread_engine/strategies/`, and the Best venue screen lists every file there.
+
+1. Copy the template: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`
+2. Give it a `NAME` and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
+3. Reload the page and pick it. Edits to a strategy apply on the next run.
+
+```python
+from . import Signal, priced
+
+NAME = "Momentum: buy YES under 40¢"
+
+def decide(matches, client):
+    for m, p in priced(matches, client):          # upcoming, rule-clean matches with both venues' prices
+        if p.a.yes_ask < 0.40 and p.b.yes_ask < 0.40:
+            return Signal(m, "yes", 50, max_price=0.40, why="YES is under 40¢ on both venues.")
+    return None                                    # no trade
+```
+
+`client` is the uselayer SDK with your keys, so a strategy can read anything: `client.prices(m)`, `client.book(m.kalshi)`. The four examples in the folder (first upcoming match, the favorite, an underdog under 30¢, where the venues disagree) are examples, not advice. "Pick a trade yourself" on the same screen skips the strategy: choose a market, YES or NO, contracts and a max price.
+
 ## Your keys stay on your machine
 
 - `.env` is git-ignored. Each key is read by the SDK and sent only to its own service: the Kalshi key to Kalshi, the Polymarket US key to Polymarket US, the Layer key to Layer, the LLM key to your LLM provider.
@@ -54,14 +76,10 @@ Keys in `.env`:
 
 ## Paper and live
 
-- **Paper (the default).** Orders fill against the venues' real order books with fake money, in the SDK's local store (`~/.uselayer/paper.db`). Nothing reaches a venue.
+- **Paper (the default).** Orders fill against the venues' real order books with fake money, in the bot's own store (`~/.uselayer/spread-bot/paper.db`, or `BOT_STORE_DIR`). Nothing reaches a venue. The "Paper account" line shows what's open and how much of your limit it uses; "Reset" starts the fake account over.
 - **Live.** Set `BOT_MODE=live` in `.env` and add the key for each venue you'll trade, then restart. Orders are then real, with your money. The header shows a red LIVE badge. Only the exact word `live` turns it on. If your account already has orders or positions, the SDK starts a new live store with its kill switch on: check them, then run `uv run python -m uselayer resume --mode live` in `engine/`.
-- Live or paper, every order goes through the SDK's guardrails: a budget across everything (`BOT_BUDGET`, default $100), a price collar, and a kill switch. To stop everything from any terminal: `cd engine && uv run python -m uselayer kill`.
-- A comparison is a snapshot of both books when you ran it. A book can move before an order arrives. The limit price caps what an order can pay, and orders are immediate-or-cancel. The arbitrage trade reads both books again first and sends nothing if the gap is gone.
-
-## Your strategy here
-
-`engine/spread_engine/strategy.py` is where your strategy goes. It gets the matched markets and returns a `Signal`: which market, YES or NO, how many contracts, and an optional maximum price. The example reads prices with the SDK, picks the first upcoming match whose rules don't differ and where both venues have YES on offer, and asks for 100 YES. It's a placeholder, not advice. The Best venue screen runs it, then compares and sends that order.
+- Live or paper, every order goes through the SDK's guardrails: a budget across everything (`BOT_BUDGET`, default $100), a price collar, and a kill switch. To stop everything from any terminal: `cd engine && uv run python -m uselayer kill --mode paper --store ~/.uselayer/spread-bot/paper.db` (or `live.db` with `--mode live`).
+- A comparison is a snapshot of both books when you ran it. A book can move before an order arrives. The order's limit price (shown as "pays at most") caps what it can pay, and it's immediate-or-cancel: it fills what's there at that price, and the rest is cancelled. The arbitrage trade reads both books again first and sends nothing if the gap is gone.
 
 ## How the arbitrage scan works
 

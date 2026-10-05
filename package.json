@@ -6,8 +6,8 @@
   "scripts": {
     "setup": "npm ci && cd engine && uv sync",
     "dev": "concurrently --kill-others --names engine,web --prefix-colors blue,green \"npm:dev:engine\" \"npm:dev:web\"",
-    "dev:engine": "cd engine && uv run uvicorn spread_engine.app:app --host 127.0.0.1 --port 8765 --no-access-log",
-    "dev:web": "next dev --hostname 127.0.0.1 --port 3200",
+    "dev:engine": "cd engine && uv run uvicorn spread_engine.app:app --host 127.0.0.1 --port ${ENGINE_PORT:-8765} --no-access-log",
+    "dev:web": "next dev --hostname 127.0.0.1 --port ${WEB_PORT:-3200}",
     "build": "next build",
     "lint": "eslint",
     "test": "vitest run && cd engine && uv run pytest -q",
