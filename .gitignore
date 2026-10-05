@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.env
+.env.local
+*.pem
+.venv/
+__pycache__/
+*.pyc
+.uselayer/
+*.db
+.DS_Store
+.claude/
