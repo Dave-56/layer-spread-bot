@@ -43,7 +43,7 @@ Keys in `.env`:
 |---|---|---|
 | `LAYER_API_KEY` | Which markets are the same bet | [uselayer.sh](https://uselayer.sh) |
 | `KALSHI_KEY_ID`, `KALSHI_PRIVATE_KEY_PATH` | Reading Kalshi's order books (a read-only key is enough for paper mode) | Kalshi account settings → API keys |
-| `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` | Live orders only. Paper mode reads Polymarket US's public books without a key. | polymarket.us/developer |
+| `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` | Live orders, and **Save prices** for Replay (its live stream is read with your key; nothing is traded). Otherwise paper mode reads Polymarket US's public books without a key. | polymarket.us/developer |
 | `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | The optional chat panel | console.anthropic.com, or openrouter.ai |
 
 ## Try it in paper mode
@@ -54,7 +54,7 @@ Once http://127.0.0.1:3200 is open. Everything here uses real order books and fa
 - **Best venue → Run a strategy.** Pick an example strategy and press **Run**. It picks a trade, and you see which venue is cheaper for it.
 - **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each market is compared on both venues, biggest saving first.
 - **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
-- **Arbitrage → Replay.** Pick saved prices and press **Replay** to see whether a past gap was real money (see [Replay prices you saved](#replay-prices-you-saved)).
+- **Arbitrage → Replay.** Pick a game that's on now and press **Save prices**. When it's done, press **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
 - **Paper account.** After a paper trade, a line at the top of the Arbitrage tab shows what's open. **Reset** starts the fake account over.
 
 ## Strategies
@@ -142,15 +142,21 @@ Expect most scans to end with no gap. When nothing is still money after fees, th
 
 ## Replay prices you saved
 
-The Replay switch on the Arbitrage screen runs saved order books through the same checks as the live scan, in the SDK's backtest mode, moment by moment. Pick a file and press **Replay**.
+Replay re-runs prices you saved from a live game, moment by moment, to show whether a gap would have made money after fees. It runs the saved order books through the same checks as the live scan, in the SDK's backtest mode.
 
-Save a matched pair's books while it trades (both venues, every change):
+Nothing comes pre-saved: Kalshi's and Polymarket US's terms don't let this repo ship their prices, so you save your own. On the Arbitrage screen, switch to **Replay**:
+
+1. Under **Save prices**, pick a game (games on now are listed first, since that's when prices move) and how long to save (30 minutes unless you pick otherwise).
+2. Press **Save prices**. Both venues' books for that game are saved while it trades, every change. You see the market, the time left and how many price updates are saved so far. **Stop** ends it early and keeps what's saved.
+3. When it ends, the new file is selected under **Saved prices**. Press **Replay**.
+
+One recording runs at a time, for as long as the app is running. Saving prices needs your Layer key, your Kalshi key (`KALSHI_KEY_ID` and `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY`) and your Polymarket US key (`POLYMARKET_US_KEY_ID` and `POLYMARKET_US_SECRET_KEY`): each venue's live stream is read with your own key, and nothing is traded. Files go to `recordings/` (not committed), with the match saved next to them.
+
+Advanced: the same recording from a terminal, for any Kalshi ticker Layer has matched (Layer finds its Polymarket US twin):
 
 ```bash
 npm run record -- KXNBAGAME-26OCT05MEMATL-ATL --minutes 60
 ```
-
-Use any Kalshi ticker from a scan; Layer finds its Polymarket US twin. Files go to `recordings/` (not committed), with the match saved next to them. Recording needs your Kalshi key and your Polymarket US key (its live stream is read with your key; nothing is traded).
 
 Any other file the SDK's `import_events` reads works too: type its folder under Settings → Folder. A file without a saved match is paired through Layer's matching. An optional `<name>.meta.json` beside it can give `settles_at` and `"sizes_unknown": true`, for a file whose order sizes are placeholders. Such a file is priced at the Contracts number under Settings (100 by default) at the top price on both venues, and the result says so: "Size unknown: assumes 100 contracts at the top price on both venues." That's an assumption, not depth the file shows. It isn't priced at 1 contract because Kalshi rounds each order's fee up to the cent: on one contract a 0.3¢ fee bills 1¢ and hides a real 1–2¢ gap.
 
@@ -158,7 +164,7 @@ Replays use the SDK's dated fee schedules (uselayer 0.4.1: Kalshi from Oct 1, 20
 
 The answer comes first: "2 of 8 moments were still money after fees" and how long the gap lasted, then the best moment as the same card as a live gap, and the other moments by reason, folded. When there's nothing to show, it's one sentence:
 
-- No files: "No saved prices on this computer yet: save some with npm run record -- <kalshi ticker>."
+- No files: "No saved prices yet. Pick a game that's on now and press Save prices."
 - No pair in the file: "Can't replay this file: it doesn't hold a Kalshi market and its Polymarket US match together."
 - Too early: "Can't replay this file: it's from before Nov 3, 2025, and the SDK doesn't have Polymarket US's fees from before then yet."
 - Never priced: "Can't replay this file: it never has prices on both venues at the same moment."

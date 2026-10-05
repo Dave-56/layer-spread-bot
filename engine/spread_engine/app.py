@@ -16,6 +16,10 @@ The web app calls it; nothing else should. It answers only requests from this ma
     POST /arb/trade       Job 2: buy both sides of one survivor (paper unless BOT_MODE=live)
     GET  /replay/files    replayable files in recordings/ (npm run record) and a folder you pick
     POST /replay/run      Job 2 replayed: one file through the same scan, in backtest mode
+    GET  /record/games    matched games to save prices for: on now first, then soonest
+    POST /record/start    save one matched pair's prices to recordings/ in the background (one at a time)
+    GET  /record/status   the recording's progress: time left, events saved; or how it ended
+    POST /record/stop     stop it early; what's written is kept
 """
 
 from __future__ import annotations
@@ -24,21 +28,22 @@ import json
 import threading
 from collections import deque
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import uselayer
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from uselayer import Client, Match, VenueError
 from uselayer.guardrails import order_risk
 
-from . import config, every_market, replay, strategies
+from . import config, every_market, recorder, replay, strategies
 from .funnel import ScanSettings, quote_view, scan
 from .reads import GatewayReads, cached_books
 from .strategies import upcoming
-from .views import busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
+from .views import _time, busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_warning, trade_error
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -486,6 +491,67 @@ def replay_run(b: ReplayBody) -> dict[str, Any]:
         raise HTTPException(422, str(e)) from e
     except replay.CannotPrice as e:
         raise HTTPException(422, str(e)) from e
+
+
+def _kickoff(m: Match) -> datetime | None:
+    """The earlier of the two venues' event times. Polymarket US gives the kickoff; Kalshi's is often
+    the expected end (France vs Belgium, Oct 5: Polymarket US 18:45 UTC, Kalshi 21:45 UTC)."""
+    times = [t for t in (_time(m.kalshi.event_time), _time(m.polymarket_us.event_time)) if t]
+    return min(times) if times else None
+
+
+def _on_now(m: Match, now: datetime) -> bool:
+    """The game has kicked off and isn't over (``_list`` leaves out the ones that are over)."""
+    t = _kickoff(m)
+    return t is not None and t <= now
+
+
+@app.get("/record/games")
+def record_games(q: str | None = None, limit: int = Query(default=100, gt=0, le=200)) -> dict[str, Any]:
+    """Matched markets that aren't over, for Save prices: games on now first (prices move most), then soonest."""
+    ms, _ = _list(q, None, None, None, limit)
+    now = datetime.now(UTC)
+    far = datetime.max.replace(tzinfo=UTC)
+    ordered = sorted(ms, key=lambda m: (not _on_now(m, now), _kickoff(m) or far))
+    return {"matches": [{**match_view(m), "on_now": _on_now(m, now)} for m in ordered]}
+
+
+class RecordBody(BaseModel):
+    match_id: str
+    minutes: float = Field(default=30, gt=0, le=recorder.MAX_MINUTES)
+
+
+def _record_view() -> dict[str, Any]:
+    r = recorder.current()
+    return {"recording": r.view() if r else None}
+
+
+@app.post("/record/start")
+def record_start(b: RecordBody) -> dict[str, Any]:
+    """Save prices: the pair's books on both venues, recorded with your keys (nothing is traded)."""
+    missing = recorder.missing_key()
+    if missing:
+        raise HTTPException(400, missing)
+    try:
+        m = _find(b.match_id)
+    except HTTPException as e:
+        raise HTTPException(404, recorder.NO_MATCH) from e
+    try:
+        recorder.start(m, b.minutes)
+    except recorder.Busy as e:
+        raise HTTPException(409, str(e)) from e
+    return _record_view()
+
+
+@app.get("/record/status")
+def record_status() -> dict[str, Any]:
+    return _record_view()
+
+
+@app.post("/record/stop")
+def record_stop() -> dict[str, Any]:
+    recorder.stop()
+    return _record_view()
 
 
 @app.post("/arb/trade")

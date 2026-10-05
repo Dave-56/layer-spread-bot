@@ -269,7 +269,25 @@ export type ScanEvent =
   | { type: "done"; total: number; counts: Record<Verdict, number>; finished_skipped?: number }
   | { type: "error"; error: EngineError };
 
-// Replay: a pair the user recorded with the SDK (npm run record), run through the same scan.
+// Save prices: one matched pair's books recorded by the engine (the SDK's record_stream), for Replay.
+export interface RecordGame extends MatchView {
+  on_now: boolean; // started, by the venues' own start time, and not over
+}
+
+export interface Recording {
+  state: "recording" | "done" | "stopped" | "failed";
+  match: MatchView;
+  minutes: number;
+  started_at: string;
+  ends_at: string;
+  seconds_left: number;
+  events: number; // book changes and trades written so far
+  path: string | null; // null when nothing was saved
+  file: string | null;
+  error: string | null; // one plain sentence when it failed
+}
+
+// Replay: a pair the user recorded with the SDK (Save prices, or npm run record), run through the same scan.
 export interface ReplayFile {
   path: string;
   file: string;

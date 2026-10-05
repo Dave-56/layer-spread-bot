@@ -2,7 +2,7 @@
 
     npm run record -- KXNBAGAME-26OCT05MEMATL-ATL --minutes 60
 
-Give a Kalshi ticker. Layer finds its Polymarket US twin; the SDK's record_stream then writes every
+The app does the same from Arbitrage → Replay → Save prices, without a ticker. Here, give a Kalshi ticker. Layer finds its Polymarket US twin; the SDK's record_stream then writes every
 book change and trade from both venues to recordings/<ticker>-<UTC time>.jsonl, with the match
 saved next to it (.match.json). Everything stays on this machine.
 
@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import argparse
 import functools
-import json
 import sys
-from datetime import UTC, datetime
 
 from uselayer import Client, Kalshi, PolymarketUS, VenueError, record_stream
 
 from spread_engine import config  # loads .env
-from spread_engine.replay import RECORDINGS, layer_match, sidecar
+from spread_engine.recorder import markets, new_file
+from spread_engine.replay import RECORDINGS, layer_match
 
 print = functools.partial(print, flush=True)  # noqa: A001  (show progress at once, even into a file)
 
@@ -47,15 +46,11 @@ def main() -> int:
     if m.caveats:
         print(f"  ! Layer flags a rule difference ({', '.join(m.caveats)}); the replay will drop this pair for it.")
 
-    RECORDINGS.mkdir(exist_ok=True)
-    path = RECORDINGS / f"{k.market_id}-{datetime.now(UTC):%Y%m%dT%H%MZ}.jsonl"
-    sidecar(path).write_text(json.dumps(m.to_dict(), indent=1))
+    path = new_file(m)
     print(f"  → {path.relative_to(RECORDINGS.parent)} for {a.minutes:g} min (Ctrl-C stops it; what's written is kept)")
     try:
         s = record_stream(
-            # The twin's own id: "<slug>:short" records the short side's book under that id,
-            # which is what quote() looks for on replay.
-            [k.market_id, u.market_id],
+            markets(m),
             path,
             kalshi=kalshi,
             polymarket_us=pm,
