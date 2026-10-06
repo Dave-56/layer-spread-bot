@@ -11,6 +11,7 @@ from uselayer import Match, VenueError
 from uselayer.books import Book
 
 from spread_engine import spend
+from spread_engine.views import money_label
 from tests.test_app import SECRET, local
 from tests.test_replay import MATCH
 
@@ -77,7 +78,7 @@ def test_more_contracts_pays_more_and_each_fits_the_amount() -> None:
     assert v["headline"]["title"] == f"Buy on Polymarket US: it pays ${more} more if you win"
     assert v["headline"]["detail"] == f"Your $50 wins ${pm['contracts']} on Polymarket US and ${k['contracts']} on Kalshi, fees included."
     assert pm["win_line"] == f"Wins ${pm['contracts']}"
-    assert pm["cost_line"].startswith(f"{pm['contracts']} YES at 40¢ + $")
+    assert pm["cost_line"].startswith(f"{money_label(pm['total_cost'])} at 40¢ avg, $")
 
 
 def sdk_cost(books: list[Book], name: str, n: int) -> float | None:
@@ -147,18 +148,53 @@ def test_more_payout_gets_the_pays_more_pill() -> None:
     assert view(50, [(0.45, 5000)], [(0.40, 5000)])["pick_label"] == "Pays more"
 
 
-def test_a_thin_book_says_how_much_it_used() -> None:
-    v = view(500, [(0.45, 5000)], [(0.40, 20)])
+def test_a_venue_whose_book_runs_out_cant_take_the_amount() -> None:
+    # Polymarket US is cheaper but has only 20 for sale near its price: about $8 of the $500. Comparing
+    # what $8 wins there with what $500 wins on Kalshi isn't the same bet, so only Kalshi can take $500.
+    v = view(500, [(0.45, 5000)], [(0.40, 20)], collar=0.05)
+    k, pm = venue(v, "kalshi"), venue(v, "polymarket_us")
+    assert pm["depth_limited"] and not pm["ok"] and not pm["cheaper"] and pm["skip"] == "not_enough_size"
+    assert pm["skip_line"] == f"Polymarket US can't take $500: it has only {money_label(pm['total_cost'])} for sale near its price."
+    assert v["cheaper"] == "kalshi" and k["cheaper"] and v["more"] is None
+    assert v["headline"]["title"] == "Buy on Kalshi: the only venue that can take $500 on YES"
+    assert v["headline"]["detail"] == (
+        f"It wins ${k['contracts']:,} if you're right, fees included. {pm['skip_line']} Spread pays at most 5¢ above a venue's cheapest offer."
+    )
+
+
+def test_the_thin_venue_is_left_out_even_when_it_would_win_more() -> None:
+    # Kalshi: $40 of $50 at 10¢ (400 to win). Polymarket US takes all $50 at 40¢. The old answer was
+    # "Kalshi pays more" for $40 against $50: now Kalshi can't take $50.
+    v = view(50, [(0.10, 400)], [(0.40, 5000)])
+    assert v["cheaper"] == "polymarket_us"
+    assert venue(v, "kalshi")["skip_line"].startswith("Kalshi can't take $50: it has only $4")
+
+
+def test_both_books_run_out_is_no_trade() -> None:
+    v = view(500, [(0.45, 30)], [(0.40, 20)])
+    assert v["cheaper"] is None and not any(r["ok"] for r in v["venues"])
+    assert v["headline"]["title"] == "No trade: neither venue can take $500 on YES right now"
+    assert "Kalshi can't take $500" in v["headline"]["detail"] and "Polymarket US can't take $500" in v["headline"]["detail"]
+
+
+def test_a_book_that_runs_out_with_the_money_still_counts() -> None:
+    # 111 for sale at 45¢: $50 buys 110 with fees, one more wouldn't fit anyway. The money ran out first.
+    v = view(50, [(0.45, 111)], [(0.40, 5000)])
+    assert venue(v, "kalshi")["ok"] and v["pick_label"] == "Pays more" and v["more"] > 0
+
+
+def test_dollar_lines_never_count_contracts() -> None:
+    v = view(50, [(0.45, 5000)], [(0.40, 5000)])
     pm = venue(v, "polymarket_us")
-    assert pm["contracts"] == 20 and pm["depth_limited"]
-    assert f"Polymarket US has only 20 for sale near its cheapest price, so it uses {pm['cost_line'].split('= ')[1]}." in v["headline"]["detail"]
+    assert pm["cost_line"] == f"{money_label(pm['total_cost'])} at 40¢ avg, {money_label(pm['fees'])} fee included"
+    assert "YES at" not in json.dumps(v) and "contract" not in json.dumps(v["headline"])
 
 
 def test_too_little_for_one_contract_is_one_sentence() -> None:
     v = view(0.3, [(0.45, 5000)], [(0.40, 5000)])
     assert v["cheaper"] is None
     assert v["headline"]["title"] == "No trade: neither venue can take $0.30 on YES right now"
-    assert venue(v, "kalshi")["skip_line"].startswith("$0.30 doesn't buy one contract on Kalshi: one costs $0.4")
+    assert venue(v, "kalshi")["skip_line"].startswith("$0.30 is too little for Kalshi: its smallest bet costs $0.4")
 
 
 def test_a_venue_that_did_not_answer_leaves_no_answer() -> None:

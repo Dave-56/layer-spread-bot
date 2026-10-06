@@ -95,8 +95,12 @@ def spend_view(
     for v in VENUES:
         if v not in failed and price is not None:
             found[v] = most_for(price, v, spend)
+    # A venue whose book runs out before the money does can't take the amount: what $1 wins there
+    # isn't comparable with what $50 wins on the other venue. It's left out, like a venue that can't
+    # fill a size.
+    short = {v for v, (one, best, depth) in found.items() if is_short(spend, one, best, depth)}
     # The one that pays more if you win: the most contracts, then the lower cost, then Kalshi.
-    can = [(v, best) for v, (_, best, _) in found.items() if best is not None]
+    can = [(v, best) for v, (_, best, _) in found.items() if best is not None and v not in short]
     chosen = min(can, key=lambda x: (-x[1].size, x[1].all_in, VENUES.index(x[0])))[0] if can else None
     # The pill on its card: it pays more, or the same payout costs less there. Identical: no pick.
     pick = "Pays more" if chosen else None
@@ -119,7 +123,13 @@ def spend_view(
         if best is None and one.ok:  # it can fill one contract, but not for this little
             row["ok"] = False
             row["skip_reason"] = row["skip_line"] = (
-                f"{dollars(spend)} doesn't buy one contract on {VENUE_NAMES[v]}: one costs {money_label(one.all_in)} with its fee."
+                f"{dollars(spend)} is too little for {VENUE_NAMES[v]}: its smallest bet costs {money_label(one.all_in)} with its fee."
+            )
+        if v in short:
+            row["ok"] = False
+            row["skip"] = "not_enough_size"
+            row["skip_reason"] = row["skip_line"] = (
+                f"{VENUE_NAMES[v]} can't take {dollars(spend)}: it has only {money_label(best.all_in)} for sale near its price."
             )
         row.update(
             contracts=n,
@@ -127,6 +137,8 @@ def spend_view(
             win_line=f"Wins {dollars(n)}" if n else None,
             depth_limited=depth,
         )
+        if best is not None:  # in dollars, contracts stay in the background: "$34.23 at 14.9¢ avg, $1.94 fee included"
+            row["cost_line"] = f"{money_label(best.all_in)} at {row['avg_price_label']} avg, {money_label(best.fees or 0)} fee included"
         rows.append(row)
 
     # How much more the chosen one pays if you win (0: the same payout), and, for the same payout, how
@@ -167,18 +179,17 @@ def spend_view(
     }
 
 
+def is_short(spend: float, one: Any, best: Any | None, depth: bool) -> bool:
+    """The venue's book ran out before the money did: what's left of ``spend`` would still buy more
+    there, but there's nothing more for sale near its price."""
+    return bool(best is not None and depth and one.all_in is not None and spend - best.all_in >= one.all_in - 1e-9)
+
+
 def collar_note_for(rows: list[dict[str, Any]], collar: float | None) -> str | None:
-    """Why a venue used only part of the money: its depth near the cheapest price ran out."""
-    short = [r for r in rows if r.get("depth_limited") and r.get("contracts")]
-    if not short:
+    """Why "near its price": how far above a venue's cheapest offer Spread will pay, when a venue ran out."""
+    if collar is None or not any(r.get("skip") == "not_enough_size" and r.get("depth_limited") for r in rows):
         return None
-    lines = [
-        f"{r['venue_name']} has only {r['contracts']:,} for sale near its cheapest price, so it uses {money_label(r['total_cost'])}."
-        for r in short
-    ]
-    if collar is not None:
-        lines.append(f"Spread pays at most {cents_label(collar)} above a venue's cheapest offer.")
-    return " ".join(lines)
+    return f"Spread pays at most {cents_label(collar)} above a venue's cheapest offer."
 
 
 def _headline(spend: float, side: str, rows: list[dict[str, Any]], chosen: str | None, unknown: list[str]) -> dict[str, Any]:
@@ -207,7 +218,7 @@ def _headline(spend: float, side: str, rows: list[dict[str, Any]], chosen: str |
         costs = f"{name} {money_label(best['total_cost'])}, {other['venue_name']} {money_label(other['total_cost'])}, fees included."
         return {
             "title": f"Buy on {name}: the same {dollars(best['payout'])} if you win, {money_label(diff)} cheaper",
-            "detail": f"Your {amount} buys {best['contracts']:,} {on} on both venues: {costs}",
+            "detail": f"Your {amount} wins {dollars(best['payout'])} on both venues: {costs}",
             "retry": False,
         }
     more = best["payout"] - other["payout"]
