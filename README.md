@@ -1,5 +1,7 @@
 # Spread: an example bot on uselayer
 
+[Website](https://uselayer.sh) · [Docs](https://uselayer.sh/docs/spread) · [Python SDK](https://github.com/uselayer/uselayer-sdk) · [PyPI](https://pypi.org/project/uselayer/)
+
 With uselayer, your trading bot keeps its own strategy and gains two abilities: it buys every trade on whichever venue is cheapest after fees, and it catches cross-venue price gaps that are real money after fees, rules and depth, while skipping the fake ones.
 
 ![Spread's Best venue screen: $50 on YES for Banfield to win. Kalshi wins $225, Polymarket US wins $215, fees included, so Kalshi pays $10 more.](docs/screenshots/readme/best-venue.png)
