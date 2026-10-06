@@ -22,6 +22,7 @@ import {
 import { gamesOf } from "./BestVenue";
 import { cents, count, money, pct, side, when } from "./format";
 import { DROPS, lasted, replayHeadline, said, scanHeadline, tradeLine } from "./gaps";
+import { ruleTitle } from "./headlines";
 import { traded } from "./PaperAccount";
 import { LENGTHS, savedLine, savingLine } from "./saving";
 
@@ -45,9 +46,20 @@ const VENUES = ["kalshi", "polymarket_us"] as const;
 /** A price as the chance the market gives that side: 41¢ → "41%". */
 const chance = (p: number) => cents(p).replace("¢", "%");
 
-/** A quiet warning: the rules differ slightly, so in a rare case the two could settle differently. */
-function RuleNote({ text }: { text: string | null | undefined }) {
-  return text ? <div className="rule-note">{text}</div> : null;
+/** A quiet warning: the rules differ slightly, so in a rare case the two could settle differently.
+ * Under it, Layer's reason for each difference when it sent one; without them the warning stands alone. */
+function RuleNote({ text, reasons }: { text: string | null | undefined; reasons?: string[] }) {
+  if (!text) return null;
+  return (
+    <div className="rule-note">
+      {text}
+      {reasons?.map((r) => (
+        <div key={r} className="rule-reason">
+          {r}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** One venue's leg of the gap: its market, the side to buy and its price, and a link to it. */
@@ -124,7 +136,7 @@ function GapCard({ row, kicker, children }: { row: Pick<ScanRow, "match" | "quot
       </div>
       <Steps q={q} />
       {row.reason && <p className="small muted">{row.reason}</p>}
-      <RuleNote text={m.rule_warning} />
+      <RuleNote text={m.rule_warning} reasons={m.rule_reasons} />
       {children}
     </div>
   );
@@ -214,7 +226,7 @@ function DropGroup({ label, rows }: { label: string; rows: ScanRow[] }) {
             <span className="drop-name">{r.match.outcome ?? r.match.title}</span>
             <span className="muted"> · {r.match.title}</span>
             {r.match.rule_warning && (
-              <span className="pill warn" title={r.match.rule_warning}>
+              <span className="pill warn" title={ruleTitle(r.match)}>
                 Rules differ
               </span>
             )}
@@ -630,7 +642,7 @@ function ReplayAnswer({ res }: { res: ReplayResult }) {
         </p>
       )}
       {best?.quote && <GapCard row={best} kicker={`Best moment · ${when(best.at)}`} />}
-      {!best && <RuleNote text={res.match.rule_warning} />}
+      {!best && <RuleNote text={res.match.rule_warning} reasons={res.match.rule_reasons} />}
       {res.size_note && <p className="small muted">{res.size_note}</p>}
       {best && others > 0 && (
         <details className="fold">

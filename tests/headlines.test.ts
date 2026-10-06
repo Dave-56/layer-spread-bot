@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { skipText } from "@/components/format";
-import { alreadyExists, bestHeadline, DEFAULT_HOW, everyCell, everyOrder, everySummary, HOW, matchNote, strategyNoTrade } from "@/components/headlines";
+import { alreadyExists, bestHeadline, DEFAULT_HOW, everyCell, everyOrder, everySummary, HOW, matchNote, ruleTitle, strategyNoTrade } from "@/components/headlines";
 import type { BestResult, CompareView, EveryOutcome, EveryRow, VenueRow } from "@/lib/engine";
 
 const row = (v: Partial<VenueRow>): VenueRow => ({
@@ -225,6 +225,17 @@ describe("matchNote", () => {
   it("drops the rule warning the engine appends, since it's shown on its own", () => {
     const w = "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not.";
     expect(matchNote(`Layer is 95% sure these are the same bet. ${w}`, w)).toBe("Layer is 95% sure these are the same bet.");
+  });
+});
+
+describe("ruleTitle", () => {
+  const w = "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not.";
+  it("puts Layer's reasons after the warning, and is the warning alone without them", () => {
+    const why = "Kalshi settles on the league's official box score; Polymarket US uses ESPN.";
+    expect(ruleTitle({ rule_warning: w, rule_reasons: [why] })).toBe(`${w} ${why}`);
+    expect(ruleTitle({ rule_warning: w, rule_reasons: [] })).toBe(w);
+    expect(ruleTitle({ rule_warning: w })).toBe(w);
+    expect(ruleTitle({ rule_warning: null, rule_reasons: [why] })).toBeUndefined();
   });
 });
 
