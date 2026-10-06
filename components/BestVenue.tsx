@@ -22,6 +22,7 @@ import {
   everyOrder,
   everySummary,
   HOW,
+  marketName,
   matchNote,
   ruleTitle,
   skipLine,
@@ -148,7 +149,7 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
         {m.title}
         {t ? ` · ${t}` : ""}
       </div>
-      <div className="market-outcome">{m.outcome ?? m.title}</div>
+      <div className="market-outcome">{marketName(m)}</div>
       <div className="market-venues">
         {(["kalshi", "polymarket_us"] as const).map((venue) => {
           const p = c?.pair[venue];
@@ -614,9 +615,10 @@ const EVERY_CATEGORIES = [
   { id: "crypto", name: "Crypto" },
 ] as const;
 const EVERY_LIMIT = 25;
-const EVERY_SPEND = 50; // dollars on YES, like Search a game's Amount box
+const EVERY_SPEND = 50; // dollars on YES to start, like Search a game's Amount box
 
 interface EveryScan {
+  spend: number; // the amount this scan priced (the box can change after)
   total: number | null; // null until the engine has listed the markets
   rows: EveryRow[];
   empty: string | null;
@@ -637,6 +639,7 @@ function EveryPrice({ r, venue }: { r: EveryRow; venue: "kalshi" | "polymarket_u
 function EveryMarketMode() {
   const t = useTrade();
   const [category, setCategory] = useState<string>("sports");
+  const [spend, setSpend] = useState(EVERY_SPEND);
   const [scan, setScan] = useState<EveryScan | null>(null);
   const [running, setRunning] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -652,9 +655,9 @@ function EveryMarketMode() {
     setRunning(true);
     setOpen(null);
     setError(null);
-    setScan({ total: null, rows: [], empty: null, counts: null });
+    setScan({ spend, total: null, rows: [], empty: null, counts: null });
     try {
-      const r = await fetch("/engine/best/scan", { ...post({ category, limit: EVERY_LIMIT, spend: EVERY_SPEND }), signal: ctl.signal });
+      const r = await fetch("/engine/best/scan", { ...post({ category, limit: EVERY_LIMIT, spend }), signal: ctl.signal });
       if (!r.ok || !r.body) throw new Error(errorText(await r.json().catch(() => null), r.status));
       for await (const e of ndjson<EveryEvent>(r.body)) {
         if (e.type === "start") setScan((s) => s && { ...s, total: e.total, empty: e.empty });
@@ -688,6 +691,10 @@ function EveryMarketMode() {
             ))}
           </select>
         </label>
+        <label className="field narrow">
+          Amount ($)
+          <input type="number" min={1} step={1} value={spend} onChange={(e) => setSpend(Math.max(1, +e.target.value || 1))} disabled={running} />
+        </label>
         <button className="btn big" onClick={run} disabled={running}>
           {running ? "Checking…" : "Check every market"}
         </button>
@@ -698,7 +705,7 @@ function EveryMarketMode() {
         )}
       </div>
       <p className="small muted hint">
-        The next {EVERY_LIMIT} markets on both venues, soonest first: where ${EVERY_SPEND} on YES wins more, after fees.
+        The next {EVERY_LIMIT} markets on both venues, soonest first: where ${spend} on YES wins more, after fees.
       </p>
 
       {scan && running && (
@@ -714,7 +721,7 @@ function EveryMarketMode() {
       )}
       {error && <p className="error">{error}</p>}
       {scan?.empty && <h2 className="headline none">{scan.empty}</h2>}
-      {scan?.counts && scan.total ? <p className="lead every-summary">{everySummary(scan.counts, scan.total, true)}</p> : null}
+      {scan?.counts && scan.total ? <p className="lead every-summary">{everySummary(scan.counts, scan.total, `$${count(scan.spend)}`)}</p> : null}
 
       {rows.length > 0 && (
         <div className="every" role="list">
@@ -722,7 +729,7 @@ function EveryMarketMode() {
             <span>Market</span>
             <span>Kalshi</span>
             <span>Polymarket US</span>
-            <span>Pays more for ${EVERY_SPEND} on YES</span>
+            <span>Pays more for ${scan?.spend ?? spend} on YES</span>
           </div>
           {rows.map((r) => {
             const cell = everyCell(r);
@@ -731,7 +738,7 @@ function EveryMarketMode() {
               <div key={r.match.id} role="listitem">
                 <button className={`every-row ${open === r.match.id ? "current" : ""}`} aria-expanded={open === r.match.id} onClick={() => pick(r)}>
                   <span className="every-market">
-                    <span className="every-outcome">{r.match.outcome ?? r.match.title}</span>
+                    <span className="every-outcome">{marketName(r.match)}</span>
                     <span className="small muted">
                       {r.match.title}
                       {t0 ? ` · ${t0}` : ""}

@@ -53,7 +53,7 @@ Keys in `.env`:
 Once http://127.0.0.1:3200 is open. Everything here uses real order books and fake money.
 
 - **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and an amount in dollars, and press **Compare venues**. You see what that amount wins on each venue if you're right, fees included, and which one pays more. Each venue gets its own size: the most whole contracts the amount buys there. This tab never sends an order.
-- **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each of the next 25 markets is compared for $50 on YES, the biggest difference in what you'd win first.
+- **Best venue → Every market.** Pick a group of markets and an amount in dollars ($50 to start) and press **Check every market**. Each of the next 25 markets is compared for that amount on YES, the biggest difference in what you'd win first.
 - **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
 - **Arbitrage → Replay.** Pick a game that's on now and press **Save prices**. When it's done, press **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
 - **Paper account.** After a paper trade, a line at the top of the Arbitrage tab shows what's open. **Reset** starts the fake account over.
@@ -76,7 +76,7 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
-"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which is cheaper for 100 YES after fees, biggest saving first. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market whose rules differ slightly on the two venues is shown with that warning. Click a row to see that market's full comparison.
+"Every market" on the same screen checks the next 25 markets in one category (Sports, News, politics & economics, or Crypto), soonest first, and lists each outcome's price on Kalshi and Polymarket US and which pays more for your amount on YES after fees, biggest difference first. A venue whose book runs out before your money does (it has only $1 for sale near its price, say) can't take the amount: the row says "Only Kalshi can take $50" and why, rather than comparing what $1 wins with what $50 wins. Rows appear as each comparison finishes: Polymarket US allows only a few book reads every 10 seconds, so a full check takes two to three minutes. A market only one venue can price says why in one sentence, a market Polymarket US didn't answer for says "Couldn't check", and a market whose rules differ slightly on the two venues is shown with that warning. Click a row to see that market's full comparison.
 
 ### Add your own
 
