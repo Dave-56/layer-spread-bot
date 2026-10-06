@@ -119,7 +119,7 @@ A strategy file is your own Python, run by the engine on your machine with your 
 
 ## How the arbitrage scan works
 
-Press **Scan**. Settings (folded) holds the search, contracts (100), minimum profit a contract (0¢), minimum return a day (0%) and how many markets (50). A scan of 50 takes about two minutes: Polymarket US asks for a pause when its books are read often, and the SDK waits for it.
+Click **Scan**. Settings (folded) holds the search, contracts (100), minimum profit a contract (0¢), minimum return a day (0%) and how many markets (50). A scan of 50 takes about two minutes: Polymarket US asks for a pause when its books are read often, and the SDK waits for it.
 
 The answer comes first: "2 of 50 gaps are still money after fees", or one sentence saying why none is, e.g. "No trade: 46 of 50 have no gap, 3 lose the gap to fees and 1 has nobody selling on one venue."
 
@@ -148,8 +148,8 @@ Replay re-runs prices you saved from a live game, moment by moment, to show whet
 Nothing comes pre-saved: Kalshi's and Polymarket US's terms don't let this repo ship their prices, so you save your own. On the Arbitrage screen, switch to **Replay**:
 
 1. Under **Save prices**, pick a game (games on now are listed first, since that's when prices move) and how long to save (30 minutes unless you pick otherwise).
-2. Press **Save prices**. Both venues' books for that game are saved while it trades, every change. You see the market, the time left and how many price updates are saved so far. **Stop** ends it early and keeps what's saved.
-3. When it ends, the new file is selected under **Saved prices**. Press **Replay**.
+2. Click **Save prices**. Both venues' books for that game are saved while it trades, every change. You see the market, the time left and how many price updates are saved so far. **Stop** ends it early and keeps what's saved.
+3. When it ends, the new file is selected under **Saved prices**. Click **Replay**.
 
 One recording runs at a time, for as long as the app is running. Saving prices needs your Layer key, your Kalshi key (`KALSHI_KEY_ID` and `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY`) and your Polymarket US key (`POLYMARKET_US_KEY_ID` and `POLYMARKET_US_SECRET_KEY`): each venue's live stream is read with your own key, and nothing is traded. Files go to `recordings/` (not committed), with the match saved next to them.
 
