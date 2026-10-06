@@ -86,15 +86,9 @@ export default function Page() {
               </button>
             </nav>
 
-            {/* Best venue sends nothing, so the paper account (and Reset) shows with Arbitrage only. */}
-            {tab === "best" ? (
-              <BestVenue />
-            ) : (
-              <>
-                <PaperAccount />
-                <Arbitrage mode={mode} />
-              </>
-            )}
+            {/* Both tabs can send fake-money orders (Best venue's test button, Arbitrage's paper trade). */}
+            <PaperAccount />
+            {tab === "best" ? <BestVenue mode={mode} /> : <Arbitrage mode={mode} />}
           </div>
         </main>
       </div>
