@@ -602,7 +602,7 @@ const EVERY_CATEGORIES = [
   { id: "crypto", name: "Crypto" },
 ] as const;
 const EVERY_LIMIT = 25;
-const EVERY_SIZE = 100;
+const EVERY_SPEND = 50; // dollars on YES, like Search a game's Amount box
 
 interface EveryScan {
   total: number | null; // null until the engine has listed the markets
@@ -642,7 +642,7 @@ function EveryMarketMode() {
     setError(null);
     setScan({ total: null, rows: [], empty: null, counts: null });
     try {
-      const r = await fetch("/engine/best/scan", { ...post({ category, limit: EVERY_LIMIT, size: EVERY_SIZE }), signal: ctl.signal });
+      const r = await fetch("/engine/best/scan", { ...post({ category, limit: EVERY_LIMIT, spend: EVERY_SPEND }), signal: ctl.signal });
       if (!r.ok || !r.body) throw new Error(errorText(await r.json().catch(() => null), r.status));
       for await (const e of ndjson<EveryEvent>(r.body)) {
         if (e.type === "start") setScan((s) => s && { ...s, total: e.total, empty: e.empty });
@@ -686,7 +686,7 @@ function EveryMarketMode() {
         )}
       </div>
       <p className="small muted hint">
-        The next {EVERY_LIMIT} markets on both venues, soonest first: where {EVERY_SIZE} YES costs less, after fees.
+        The next {EVERY_LIMIT} markets on both venues, soonest first: where ${EVERY_SPEND} on YES wins more, after fees.
       </p>
 
       {scan && running && (
@@ -702,7 +702,7 @@ function EveryMarketMode() {
       )}
       {error && <p className="error">{error}</p>}
       {scan?.empty && <h2 className="headline none">{scan.empty}</h2>}
-      {scan?.counts && scan.total ? <p className="lead every-summary">{everySummary(scan.counts, scan.total)}</p> : null}
+      {scan?.counts && scan.total ? <p className="lead every-summary">{everySummary(scan.counts, scan.total, true)}</p> : null}
 
       {rows.length > 0 && (
         <div className="every" role="list">
@@ -710,9 +710,7 @@ function EveryMarketMode() {
             <span>Market</span>
             <span>Kalshi</span>
             <span>Polymarket US</span>
-            <span>
-              Cheaper for {EVERY_SIZE} YES, after fees
-            </span>
+            <span>Pays more for ${EVERY_SPEND} on YES</span>
           </div>
           {rows.map((r) => {
             const cell = everyCell(r);

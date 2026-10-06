@@ -219,6 +219,17 @@ describe("every market", () => {
     expect(everySummary({ ...counts, kalshi: 0, same: 0, one_venue: 0, neither: 0, error: 0 }, 9)).toBe("Checked 9 markets. Polymarket US is cheaper on 9.");
     expect(everySummary({ kalshi: 0, polymarket_us: 0, same: 0, one_venue: 3, neither: 1, error: 0 }, 4)).toBe("Checked 4 markets. None could be priced on both venues.");
   });
+  it("in dollars: who pays more if you win, and by how much", () => {
+    const dollars = { spend: 50, more: 10, more_label: "$10", saving: null };
+    expect(everyCell(every("kalshi", { ...dollars, cheaper_name: "Kalshi" }))).toEqual({ title: "Kalshi", detail: "pays $10 more" });
+    const same = every("same", { ...dollars, more: 0, more_label: null, venues: [kalshi({ win_line: "Wins $69" }), pm({ win_line: "Wins $69" })] });
+    expect(everyCell(same)).toEqual({ title: "Same payout", detail: "Wins $69 on each" });
+    const rows = [every("kalshi", { ...dollars, more: 2 }), every("polymarket_us", { ...dollars, more: 10 }), every("same", { ...dollars, more: 0 })];
+    expect(rows.sort(everyOrder).map((r) => r.best.compare?.more)).toEqual([10, 2, 0]);
+    const counts = { kalshi: 2, polymarket_us: 17, same: 3, one_venue: 1, neither: 0, error: 2 };
+    expect(everySummary(counts, 25, true)).toBe("Checked 25 markets. Kalshi pays more on 2, Polymarket US on 17, same payout on 3. 3 couldn't be priced on both venues.");
+    expect(everySummary({ ...counts, kalshi: 0 }, 23, true)).toBe("Checked 23 markets. Polymarket US pays more on 17, same payout on 3. 3 couldn't be priced on both venues.");
+  });
 });
 
 describe("matchNote", () => {

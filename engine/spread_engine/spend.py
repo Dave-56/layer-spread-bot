@@ -133,6 +133,15 @@ def spend_view(
         )
         rows.append(row)
 
+    # How much more the chosen one pays if you win (0: the same payout), and, for the same payout, how
+    # much less it costs: Every market ranks its rows by these.
+    more = saving = None
+    best_row = next((r for r in rows if r["venue"] == chosen), None)
+    other_row = next((r for r in rows if r["venue"] != chosen and r["ok"] and r.get("contracts")), None)
+    if best_row and other_row:
+        more = best_row["payout"] - other_row["payout"]
+        if more == 0:
+            saving = round((other_row["total_cost"] or 0) - (best_row["total_cost"] or 0), 2)
     headline = _headline(spend, side, rows, chosen, unknown)
     note = collar_note_for(rows, collar)
     if note:
@@ -150,8 +159,10 @@ def spend_view(
         "pick_label": pick,  # "Pays more" or "Cheaper": the pill on the chosen venue's card
         "cheaper_name": VENUE_NAMES.get(chosen) if chosen else None,
         "unavailable": [VENUE_NAMES[v] for v in unknown],
-        "saving": None,
-        "saving_label": None,
+        "more": more,  # dollars more it pays if you win, vs the other venue (0: the same payout)
+        "more_label": dollars(more) if more else None,
+        "saving": saving,  # the same payout: how much less it costs there
+        "saving_label": money_label(saving) if saving else None,
         "verdict": headline["title"],
         "headline": headline,
         "try_size": None,
