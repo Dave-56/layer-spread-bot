@@ -32,7 +32,7 @@ Nothing is hosted and nothing is deployed. Layer gets your Layer API key, the ma
 You need [Node 20+](https://nodejs.org) and [uv](https://docs.astral.sh/uv/) (`brew install uv`, or `curl -LsSf https://astral.sh/uv/install.sh | sh`). uv fetches Python 3.11+ if you don't have it.
 
 ```bash
-git clone https://github.com/Dave-56/layer-spread-bot
+git clone https://github.com/uselayer/layer-spread-bot
 cd layer-spread-bot
 npm run setup              # installs the app (npm ci) and the engine's Python packages (uv sync)
 cp .env.example .env       # then fill in your keys (below)
@@ -139,7 +139,7 @@ A gap that survives is a card: both venues side by side (the side to buy, its pr
 
 **Paper-trade both sides** calls `client.trade()`. It reads both books again, and buys only if the gap is still there after fees (at least your minimum a contract); otherwise nothing is bought, and it says so. The scan accepts a book up to 30 seconds old, the age of Polymarket US's cached public book; the trade keeps the SDK's 10-second rule. If a book is older than that, it reads both books once more, then sends nothing and says why.
 
-**Rules differ slightly.** Layer flags a match whose two markets differ on an edge case: a different data source, deadline, rounding, exception or definition. Spread doesn't drop it. It goes through the same checks as any other match and carries an amber note, e.g. "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not." Then "both sides pay $1" may not hold, so a gap whose rules differ is listed below the ones whose rules match.
+**Rules differ slightly.** Layer flags a match whose two markets differ on an edge case: a different data source, deadline, rounding, exception or definition. Spread doesn't drop it. It goes through the same checks as any other match and carries an amber note, e.g. "Rules differ slightly on where the result comes from. Both pay the same in normal cases, but in a rare case one could pay and the other not." Under it is Layer's reason, one sentence per difference that says what each venue's rules say, e.g. "Kalshi settles on the league's official box score; Polymarket US uses ESPN." A match Layer has no reason for shows the note alone. Then "both sides pay $1" may not hold, so a gap whose rules differ is listed below the ones whose rules match.
 
 Expect most scans to end with no gap. When nothing is still money after fees, the right move is no trade.
 

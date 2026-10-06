@@ -30,6 +30,9 @@ export interface MatchView {
   // Layer flagged a rule difference, as one sentence to show with the match, e.g. "Rules differ slightly
   // on where the result comes from. Both pay the same in normal cases, but ..." null when none.
   rule_warning: string | null;
+  // Why, in Layer's words: one sentence per rule difference, e.g. "Kalshi settles on the league's
+  // official box score; Polymarket US uses ESPN." Empty when Layer sent none: rule_warning stands alone.
+  rule_reasons?: string[];
   // The same for every outcome of one game or event: group search results by it.
   event_key: string | null;
   kalshi: MarketView;
@@ -127,6 +130,7 @@ export interface PairView {
   note: string; // "Layer is 95% sure these are the same bet." (+ the rule warning, if any)
   confidence: number | null;
   rule_warning: string | null;
+  rule_reasons?: string[]; // as on MatchView
 }
 
 export interface VenueRow {
@@ -353,6 +357,7 @@ export interface TradeResult {
   notes: string[];
   quote: QuoteView;
   rule_warning: string | null;
+  rule_reasons?: string[]; // as on MatchView
 }
 
 // Each reason's group name on the Arbitrage screen (components/gaps.ts words the counts).

@@ -23,6 +23,7 @@ import {
   everySummary,
   HOW,
   matchNote,
+  ruleTitle,
   skipLine,
   type How,
 } from "./headlines";
@@ -109,7 +110,7 @@ export function MatchLine({ m }: { m: MatchView }) {
         "Polymarket US"
       )}
       {m.rule_warning && (
-        <span className="pill warn" style={{ marginLeft: 6 }}>
+        <span className="pill warn" style={{ marginLeft: 6 }} title={ruleTitle(m)}>
           {m.rule_warning}
         </span>
       )}
@@ -120,16 +121,27 @@ export function MatchLine({ m }: { m: MatchView }) {
 
 // ---- Best venue ---------------------------------------------------------------------------------
 
-/** A quiet warning: the rules differ slightly, so in a rare case the two could settle differently. */
-function RuleNote({ text }: { text: string | null | undefined }) {
+/** A quiet warning: the rules differ slightly, so in a rare case the two could settle differently.
+ * Under it, Layer's reason for each difference when it sent one; without them the warning stands alone. */
+function RuleNote({ text, reasons }: { text: string | null | undefined; reasons?: string[] }) {
   if (!text) return null;
-  return <div className="rule-note">{text}</div>;
+  return (
+    <div className="rule-note">
+      {text}
+      {reasons?.map((r) => (
+        <div key={r} className="rule-reason">
+          {r}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** The match, Polymarket-style: the outcome big, then each venue's market side by side with its chance. */
 function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
   const t = when(m.event_time);
   const warning = c?.pair.rule_warning ?? m.rule_warning;
+  const reasons = c?.pair.rule_reasons ?? m.rule_reasons;
   return (
     <div className="market">
       <div className="market-event">
@@ -178,7 +190,7 @@ function MarketCard({ m, c }: { m: MatchView; c?: CompareView }) {
         })}
       </div>
       <div className="matched">{c ? matchNote(c.pair.note, c.pair.rule_warning) : "Matched by Layer: the same bet on both venues."}</div>
-      <RuleNote text={warning} />
+      <RuleNote text={warning} reasons={reasons} />
     </div>
   );
 }
@@ -561,7 +573,7 @@ function ManualMode() {
               {current.outcomes.map((m) => (
                 <button key={m.id} aria-pressed={m.id === mid} className={`outcome ${m.id === mid ? "current" : ""}`} onClick={() => setMid(m.id)}>
                   {m.outcome ?? m.title}
-                  {m.rule_warning ? <span className="warn-dot" title={m.rule_warning} /> : null}
+                  {m.rule_warning ? <span className="warn-dot" title={ruleTitle(m)} /> : null}
                 </button>
               ))}
             </div>
@@ -725,7 +737,7 @@ function EveryMarketMode() {
                       {t0 ? ` · ${t0}` : ""}
                     </span>
                     {r.match.rule_warning && (
-                      <span className="pill warn" title={r.match.rule_warning}>
+                      <span className="pill warn" title={ruleTitle(r.match)}>
                         Rules differ
                       </span>
                     )}

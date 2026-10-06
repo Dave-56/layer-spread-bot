@@ -40,7 +40,7 @@ How to work:
 - Use the tools for every number. Never estimate a price, fee or profit yourself.
 - find_matches lists markets Layer matched as the same bet on both venues. Use it to find the market the trader means.
 - compare_venues prices one order (side, size) on both venues from their live order books, with each venue's fees and how much it can fill, and names the cheaper one. Use it when the trader names a trade.
-- scan_arbitrage runs the arbitrage scan: every match through the same checks (no offers, no gap, fees bigger than the gap, too thin, return per day too low). Survivors show gross spread, fees, net and return per day. A match whose rules Layer says differ slightly on the two venues is checked like any other and carries a rule_warning: whenever you mention one, say its warning too, because the two could settle differently. Translate the trader's words into its filters: "NFL" → search "nfl", "$500" → contracts at the prices involved, "at least 1% a day" → min_return_per_day_pct 1.
+- scan_arbitrage runs the arbitrage scan: every match through the same checks (no offers, no gap, fees bigger than the gap, too thin, return per day too low). Survivors show gross spread, fees, net and return per day. A match whose rules Layer says differ slightly on the two venues is checked like any other and carries a rule_warning: whenever you mention one, say its warning too, because the two could settle differently. When it has rule_reasons (Layer's sentences on what each venue's rules say), give them as written. Translate the trader's words into its filters: "NFL" → search "nfl", "$500" → contracts at the prices involved, "at least 1% a day" → min_return_per_day_pct 1.
 - Real gaps after fees are rare. If nothing survives, say so plainly, name the closest one and why it was dropped.
 - The app shows each result as a card, so don't repeat every number. Keep the answer under 100 words: one sentence with the answer, then at most three short bullets.
 - Compare results that pay back at different times by return per day.
@@ -131,7 +131,7 @@ async function findMatches(raw: unknown): Promise<ToolOutput> {
   if (a.category) qs.set("category", a.category);
   const { matches } = await engine<{ matches: MatchView[] }>(`/matches?${qs}`);
   return {
-    forModel: matches.map((m) => ({ id: m.id, title: m.title, outcome: m.outcome, when: m.event_time ?? m.event_date, rule_warning: m.rule_warning })),
+    forModel: matches.map((m) => ({ id: m.id, title: m.title, outcome: m.outcome, when: m.event_time ?? m.event_date, rule_warning: m.rule_warning, rule_reasons: m.rule_reasons ?? [] })),
     event: { type: "matches", matches },
   };
 }
@@ -147,6 +147,7 @@ async function compareVenues(raw: unknown): Promise<ToolOutput> {
         unavailable: best.compare?.unavailable ?? [],
         verdict: best.compare?.verdict ?? best.why?.reason,
         rule_warning: best.match?.rule_warning ?? null,
+        rule_reasons: best.match?.rule_reasons ?? [],
         venues: best.why?.venues.map((v) => ({ venue: v.venue, all_in: v.all_in, avg_price: v.avg_price, fees: v.fees, size_at_limit: v.size_at_limit, skipped: v.skip, detail: best.compare?.venues.find((x) => x.venue === v.venue)?.skip_reason ?? v.detail })),
       }
     : { error: best.error };
@@ -187,6 +188,7 @@ async function scanArbitrage(raw: unknown): Promise<ToolOutput> {
     id: r.match.id,
     title: `${r.match.title} — ${r.match.outcome ?? ""}`,
     rule_warning: r.match.rule_warning,
+    rule_reasons: r.match.rule_reasons ?? [],
     verdict: r.verdict,
     reason: r.reason,
     gross_cents: r.quote?.gross_at_best != null ? +(r.quote.gross_at_best * 100).toFixed(2) : null,
