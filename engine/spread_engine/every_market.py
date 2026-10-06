@@ -57,10 +57,17 @@ def empty_line(cat: Category, started: int) -> str:
 
 
 def outcome(best: dict[str, Any]) -> str:
-    """How one comparison came out: ``kalshi`` / ``polymarket_us`` (cheaper), ``same``, ``one_venue``,
-    ``neither`` or ``error`` (couldn't check). Read from the SDK's own ``reason_code``."""
+    """How one comparison came out: ``kalshi`` / ``polymarket_us`` (cheaper, or for a dollar amount:
+    pays more), ``same``, ``one_venue``, ``neither`` or ``error`` (couldn't check). Read from the SDK's
+    own ``reason_code``, or for a dollar amount from spend.py's view."""
     if not best.get("ok") or (best.get("compare") or {}).get("unavailable"):
         return "error"  # couldn't check: it errored, or a venue didn't answer
+    c = best["compare"]
+    if c.get("spend") is not None:
+        can = [v for v in c["venues"] if v["ok"] and v.get("contracts")]
+        if len(can) == 2:
+            return c["cheaper"] if c.get("pick_label") == "Pays more" else "same"  # the same payout: "same"
+        return "one_venue" if can else "neither"
     code = (best.get("why") or {}).get("reason_code")
     if code == "cheaper":
         return best["why"]["venue"]
@@ -73,18 +80,28 @@ def outcome(best: dict[str, Any]) -> str:
 
 OUTCOMES = ("kalshi", "polymarket_us", "same", "one_venue", "neither", "error")
 
-Price = Callable[[Match, str, int], dict[str, Any]]
+Price = Callable[[Match, str, Any], dict[str, Any]]
 
 
 def scan(
-    matches: list[Match], price: Price, *, category: str, size: int, started: int = 0, side: str = "yes"
+    matches: list[Match],
+    price: Price,
+    *,
+    category: str,
+    size: int | None,
+    started: int = 0,
+    side: str = "yes",
+    spend: float | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Stream ``start`` (with ``empty``: one sentence when there's nothing to check), one ``row`` per
     market as its comparison finishes, then ``done`` with how many came out each way.
 
     ``price(match, side, size)`` is the engine's preview: ``{"ok": True, ...BestOrder, "compare"}`` or
     ``{"ok": False, "error", "error_line"}``. A failure is that row's plain reason, never the scan's.
+    With ``spend`` (dollars), ``price`` is given the amount instead of ``size`` (spend.py's view).
     """
+    if spend is not None:
+        size = None
     cat = CATEGORIES[category]
     counts = dict.fromkeys(OUTCOMES, 0)
     yield {
@@ -92,12 +109,13 @@ def scan(
         "total": len(matches),
         "category": cat.name,
         "size": size,
+        "spend": spend,
         "side": side,
         "empty": None if matches else empty_line(cat, started),
     }
     pool = ThreadPoolExecutor(max_workers=READERS)
     try:
-        reads = {pool.submit(price, m, side, size): m for m in matches}
+        reads = {pool.submit(price, m, side, spend if spend is not None else size): m for m in matches}
         for read in as_completed(reads):
             m = reads[read]
             try:
@@ -109,7 +127,7 @@ def scan(
             yield {
                 "type": "row",
                 "match": match_view(m),
-                "order": {"match_id": match_id(m), "side": side, "size": size, "max_price": None},
+                "order": {"match_id": match_id(m), "side": side, "size": size, "spend": spend, "max_price": None},
                 "best": best,
                 "outcome": how,
             }

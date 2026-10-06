@@ -66,14 +66,14 @@ def test_the_next_markets_compared_and_streamed(engine, monkeypatch: pytest.Monk
     asked, events = scan(engine, monkeypatch, [later, worded, failed, soon], body={"category": "sports", "limit": 3})
     assert asked == [(("sports",), True)]  # Layer's sports category, games that haven't started
     start, *rows, done = events
-    assert start == {"type": "start", "total": 3, "category": "Sports", "size": 100, "side": "yes", "empty": None}
+    assert start == {"type": "start", "total": 3, "category": "Sports", "size": 100, "spend": None, "side": "yes", "empty": None}
     # The next 3 games; the one 9 hours out is left out.
     by = {r["match"]["id"]: r for r in rows}
     assert set(by) == {"KXMADEUPGAME-4-A", "KXMADEUPGAME-2-A", FAILS}
 
     ok = by["KXMADEUPGAME-4-A"]
     assert ok["outcome"] == "kalshi"
-    assert ok["order"] == {"match_id": "KXMADEUPGAME-4-A", "side": "yes", "size": 100, "max_price": None}
+    assert ok["order"] == {"match_id": "KXMADEUPGAME-4-A", "side": "yes", "size": 100, "spend": None, "max_price": None}
     # The same compare view as the strategy path, from the SDK's own result.
     assert ok["best"]["ok"] is True and ok["best"]["why"]["reason_code"] == "cheaper"
     assert ok["best"]["compare"]["verdict"] == "Kalshi is $0.97 cheaper for 100 contracts, fees included: $59.71 vs $60.68."
@@ -89,6 +89,36 @@ def test_the_next_markets_compared_and_streamed(engine, monkeypatch: pytest.Monk
     assert f["best"]["error_line"] == "Polymarket US is busy right now. Try again in a few seconds."
 
     assert done == {"type": "done", "total": 3, "counts": {"kalshi": 2, "polymarket_us": 0, "same": 0, "one_venue": 0, "neither": 0, "error": 1}}
+
+
+def test_every_market_in_dollars(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    """$50 on YES for each market, priced by the SDK on made-up books: who pays more if you win, and by how much."""
+    from test_spend import book
+
+    from spread_engine import spend
+
+    # Market 1: Polymarket US 40¢ vs Kalshi 45¢ (Polymarket US pays more). Market 2: both 50¢ (same payout).
+    asks = {1: (0.45, 0.40), 2: (0.50, 0.50)}
+
+    def books(c, m):  # noqa: ANN001, ANN202
+        n = int(m.kalshi.market_id.split("-")[1])
+        k, pm = asks[n]
+        return [book("kalshi", m.kalshi.market_id, [(k, 5000)]), book("polymarket_us", m.polymarket_us.market_id, [(pm, 5000)])], {}
+
+    monkeypatch.setattr(spend, "read_books", books)
+    monkeypatch.setattr(engine, "_list_in", lambda q, cats, limit, upcoming_only=False: ([made_up(1, hours=1), made_up(2, hours=2)], 0))
+    r = local(engine.app).post("/best/scan", json={"category": "sports", "spend": 50})
+    start, *rows, done = [json.loads(line) for line in r.text.splitlines() if line]
+    assert start["spend"] == 50 and start["size"] is None
+    by = {x["match"]["id"]: x for x in rows}
+    more = by["KXMADEUPGAME-1-A"]
+    c = more["best"]["compare"]
+    assert more["outcome"] == "polymarket_us" and c["pick_label"] == "Pays more"
+    pays = {v["venue"]: v["payout"] for v in c["venues"]}
+    assert c["more"] == pays["polymarket_us"] - pays["kalshi"] > 0 and c["more_label"] == f"${c['more']}"
+    assert more["order"] == {"match_id": "KXMADEUPGAME-1-A", "side": "yes", "size": None, "spend": 50, "max_price": None}
+    assert by["KXMADEUPGAME-2-A"]["outcome"] == "same"
+    assert done["counts"] == {"kalshi": 0, "polymarket_us": 1, "same": 1, "one_venue": 0, "neither": 0, "error": 0}
 
 
 def test_every_empty_result_says_why(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001

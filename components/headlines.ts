@@ -86,7 +86,7 @@ export function strategyNoTrade(r: { started?: number; looked?: { reason: string
 
 // ---- Every market ---------------------------------------------------------------------------------
 
-/** One row's answer, for the "Cheaper for 100 YES, after fees" column: who, then by how much or why not. */
+/** One row's answer, for the "Pays more for $50 on YES" column: who, then by how much or why not. */
 export function everyCell(r: EveryRow): Headline {
   const c = r.best.compare;
   if (r.outcome === "error" || !c) {
@@ -95,6 +95,11 @@ export function everyCell(r: EveryRow): Headline {
     return { title: "Couldn't check", detail: why || r.best.error_line || "Couldn't read the prices for this one." };
   }
   const skipped = c.venues.filter((v) => !v.ok).map(skipLine).join(" ");
+  if (c.spend != null) {
+    // A dollar amount: who pays more if you win, and by how much.
+    if (r.outcome === "kalshi" || r.outcome === "polymarket_us") return { title: c.cheaper_name ?? "", detail: `pays ${c.more_label} more` };
+    if (r.outcome === "same") return { title: "Same payout", detail: `${c.venues.find((v) => v.win_line)?.win_line ?? ""} on each`.trim() };
+  }
   if (r.outcome === "kalshi" || r.outcome === "polymarket_us") return { title: c.cheaper_name ?? "", detail: `${savingWords(c)} cheaper` };
   if (r.outcome === "same") return { title: "Same price", detail: `${money(c.venues.find((v) => v.cheaper)?.total_cost)} on each` };
   if (r.outcome === "one_venue") return { title: `Only ${c.cheaper_name}`, detail: skipped };
@@ -103,17 +108,20 @@ export function everyCell(r: EveryRow): Headline {
 
 const RANK: Record<EveryOutcome, number> = { kalshi: 0, polymarket_us: 0, same: 1, one_venue: 2, neither: 3, error: 4 };
 
-/** Biggest saving first; then same price, one venue only, neither, and the ones that couldn't be checked. */
+/** Biggest saving (or for a dollar amount, biggest extra payout) first; then same price, one venue
+ * only, neither, and the ones that couldn't be checked. */
 export function everyOrder(a: EveryRow, b: EveryRow): number {
-  return RANK[a.outcome] - RANK[b.outcome] || (b.best.compare?.saving ?? 0) - (a.best.compare?.saving ?? 0);
+  const gap = (r: EveryRow) => r.best.compare?.more || r.best.compare?.saving || 0;
+  return RANK[a.outcome] - RANK[b.outcome] || gap(b) - gap(a);
 }
 
-/** The scan in one sentence, from the engine's counts. */
-export function everySummary(counts: Record<EveryOutcome, number>, total: number): string {
+/** The scan in one sentence, from the engine's counts. ``dollars``: it compared a dollar amount. */
+export function everySummary(counts: Record<EveryOutcome, number>, total: number, dollars = false): string {
   const parts: string[] = [];
-  if (counts.kalshi) parts.push(`Kalshi is cheaper on ${count(counts.kalshi)}`);
-  if (counts.polymarket_us) parts.push(`Polymarket US ${parts.length ? "" : "is cheaper "}on ${count(counts.polymarket_us)}`);
-  if (counts.same) parts.push(`${parts.length ? "same" : "Same"} price on ${count(counts.same)}`);
+  const wins = dollars ? "pays more" : "is cheaper";
+  if (counts.kalshi) parts.push(`Kalshi ${wins} on ${count(counts.kalshi)}`);
+  if (counts.polymarket_us) parts.push(`Polymarket US ${parts.length ? "" : `${wins} `}on ${count(counts.polymarket_us)}`);
+  if (counts.same) parts.push(`${parts.length ? "same" : "Same"} ${dollars ? "payout" : "price"} on ${count(counts.same)}`);
   const notBoth = counts.one_venue + counts.neither + counts.error;
   if (!parts.length) return `Checked ${count(total)} markets. None could be priced on both venues.`;
   const rest = notBoth ? ` ${count(notBoth)} couldn't be priced on both venues.` : "";

@@ -2,9 +2,13 @@
 
 With uselayer, your trading bot keeps its own strategy and gains two abilities: it buys every trade on whichever venue is cheapest after fees, and it catches cross-venue price gaps that are real money after fees, rules and depth, while skipping the fake ones.
 
+![Spread's Best venue screen: $50 on YES for Banfield to win. Kalshi wins $225, Polymarket US wins $215, fees included, so Kalshi pays $10 more.](docs/screenshots/readme/best-venue.png)
+
+*Example from Oct 5: $50 on Banfield to win. Kalshi pays $10 more if you win, fees included. On another bet it's Polymarket US.*
+
 Spread runs on your machine, with your own keys, across **Kalshi** and **Polymarket US**. It has two screens:
 
-- **Best venue.** You (by hand), your strategy, or "Every market" for a whole list decides the trade ("buy 100 YES on this outcome"). Spread prices that exact order on both venues from their live order books: each venue's average price, fees, how much it can fill, and the total cost. Then it shows which venue is cheaper for that exact order, after fees. It sends nothing.
+- **Best venue.** You (by hand), your strategy, or "Every market" for a whole list decides the trade ("$50 on YES for this outcome"). Spread prices it on both venues from their live order books: how many contracts the amount buys on each, at what average price and fees, and what each pays if you win. Then it shows which venue pays more for the same money, after fees. It sends nothing.
 - **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see both venues side by side, then gross gap → fees → net → return per day, and you can paper-trade both sides. When the two venues word a bet differently, Spread still checks it and shows a warning with it.
 
 An optional chat panel answers the same questions in plain English, with your own LLM key.
@@ -51,7 +55,7 @@ Keys in `.env`:
 Once http://127.0.0.1:3200 is open. Everything here uses real order books and fake money.
 
 - **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and an amount in dollars, and press **Compare venues**. You see what that amount wins on each venue if you're right, fees included, and which one pays more. Each venue gets its own size: the most whole contracts the amount buys there. This tab never sends an order.
-- **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each market is compared on both venues, biggest saving first.
+- **Best venue → Every market.** Pick a group of markets and press **Check every market**. Each of the next 25 markets is compared for $50 on YES, the biggest difference in what you'd win first.
 - **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
 - **Arbitrage → Replay.** Pick a game that's on now and press **Save prices**. When it's done, press **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
 - **Paper account.** After a paper trade, a line at the top of the Arbitrage tab shows what's open. **Reset** starts the fake account over.

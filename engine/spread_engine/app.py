@@ -418,7 +418,8 @@ def best_buy(b: BestBody) -> dict[str, Any]:
 class EveryMarketBody(BaseModel):
     category: str = Field(default="sports", pattern="^(sports|news|crypto)$")
     limit: int = Field(default=25, gt=0, le=50)
-    size: int = Field(default=100, gt=0, le=100_000)
+    size: int = Field(default=100, gt=0, le=100_000)  # contracts, unless
+    spend: float | None = Field(default=None, gt=0, le=by_dollar.MAX_SPEND)  # dollars (the app's)
 
 
 def _scan_price(m: Match, side: str, size: int) -> dict[str, Any]:
@@ -426,6 +427,11 @@ def _scan_price(m: Match, side: str, size: int) -> dict[str, Any]:
     # background, so it sits through a "too many requests" block rather than skipping markets.
     with cached_books(wait_out=15.0):
         return _price(m, side, size)
+
+
+def _scan_spend(m: Match, side: str, amount: float) -> dict[str, Any]:
+    with cached_books(wait_out=15.0):  # in the background: sit out a "too many requests" block
+        return _spend(m, side, amount)
 
 
 @app.post("/best/scan")
@@ -436,7 +442,8 @@ def best_scan(b: EveryMarketBody) -> StreamingResponse:
     ms = every_market.soonest_first(ms)[: b.limit]
 
     def lines() -> Iterator[str]:
-        for event in every_market.scan(ms, _scan_price, category=b.category, size=b.size, started=started):
+        price = _scan_spend if b.spend is not None else _scan_price
+        for event in every_market.scan(ms, price, category=b.category, size=b.size, started=started, spend=b.spend):
             yield json.dumps(event, default=str) + "\n"
 
     return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"cache-control": "no-store"})

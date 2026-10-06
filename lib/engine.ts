@@ -170,6 +170,8 @@ export interface CompareView {
   spend?: number | null; // the dollar amount compared, or null for a contract count
   spend_label?: string; // "$50"
   pick_label?: string | null; // the chosen venue's pill for a dollar amount: "Pays more" or "Cheaper"
+  more?: number | null; // a dollar amount: how much more the chosen venue pays if you win (0: the same payout)
+  more_label?: string | null; // "$10"
   headline?: { title: string; detail: string | null; retry: boolean }; // the engine's answer for a dollar amount
   max_price: number | null;
   pair: PairView;
@@ -193,13 +195,13 @@ export type EveryOutcome = "kalshi" | "polymarket_us" | "same" | "one_venue" | "
 export interface EveryRow {
   type: "row";
   match: MatchView;
-  order: { match_id: string; side: "yes" | "no"; size: number; max_price: number | null };
+  order: { match_id: string; side: "yes" | "no"; size: number | null; spend?: number | null; max_price: number | null };
   best: BestResult; // the same result /best/preview gives, with its compare view
   outcome: EveryOutcome;
 }
 
 export type EveryEvent =
-  | { type: "start"; total: number; category: string; size: number; side: string; empty: string | null }
+  | { type: "start"; total: number; category: string; size: number | null; spend?: number | null; side: string; empty: string | null }
   | EveryRow
   | { type: "done"; total: number; counts: Record<EveryOutcome, number> };
 
