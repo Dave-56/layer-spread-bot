@@ -401,6 +401,27 @@ def verdict_line(why: Any) -> str:
     return f"{name} is {by} cheaper for {size} contracts, fees included: {total} vs {money_label(other.all_in)}."
 
 
+def test_fill_line(r: Any, latency_s: float) -> str:
+    """What the Best venue screen's test order did (the SDK's BestOrder), as one sentence in dollars."""
+    o = r.order
+    if not r.sent or o is None:
+        return f"Nothing was bought. {verdict_line(r.why)}"
+    name = VENUE_NAMES.get(o.venue, o.venue)
+    if not o.filled:
+        return (
+            f"Nothing filled on {name}: the price moved in the {latency_s:g} seconds before the order arrived, "
+            "as it can with real money. Compare again for today's price."
+        )
+    total = o.filled * (o.avg_price or 0) + (o.fees or 0)
+    line = (
+        f"Filled {_size(o.filled)} {o.side.upper()} on {name} at {cents_label(o.avg_price)} average: "
+        f"{money_label(total)}, fees included."
+    )
+    if o.filled < o.size:
+        line += f" The other {_size(o.size - o.filled)} were gone by the time it arrived."
+    return line
+
+
 def collar_note(why: Any, collar: float | None) -> str | None:
     """Why a thin market can't fill a big order, when the SDK's price collar is what stopped it."""
     if collar is None or not any(v.skip == "not_enough_size" and v.capped_by == "price_collar" for v in why.venues):

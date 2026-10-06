@@ -15,6 +15,7 @@ import {
   type Signal,
 } from "@/lib/engine";
 import { cents, count, money, side, skipText, UNKNOWN_SKIPS, when } from "./format";
+import { traded } from "./PaperAccount";
 import {
   bestHeadline,
   DEFAULT_HOW,
@@ -33,7 +34,8 @@ import {
 // venues, after fees and depth, and shows where it's cheaper for that size.
 //
 // The flow: choose (a game by hand, or a strategy) → compare → the match, the two venues' markets
-// side by side, and the answer: where it's cheaper, and by how much. Nothing is sent from here.
+// side by side, and the answer: where it's cheaper, and by how much. A test button then sends the
+// order to that venue with fake money (POST /best/test, paper only); nothing real is sent from here.
 // Every number and label is the engine's (BestResult.compare); nothing is computed here.
 
 // ---- Used by the Arbitrage tab too ---------------------------------------------------------------
@@ -260,12 +262,14 @@ function useTrade() {
   const [best, setBest] = useState<BestResult | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
+  const [test, setTest] = useState<TestOrder>(null);
 
   function start() {
     setBusy("run");
     setError(null);
     setTrade(null);
     setBest(null);
+    setTest(null);
   }
   function fail(e: unknown) {
     setError(e instanceof Error ? e.message : String(e));
@@ -273,6 +277,7 @@ function useTrade() {
   function show(t: Signal, picked: string, b: BestResult | null) {
     setTrade({ ...t, picked });
     setBest(b);
+    setTest(null);
   }
   async function compare(t: Signal, picked: string) {
     start();
@@ -285,7 +290,58 @@ function useTrade() {
   }
   /** The same comparison again, after a venue didn't answer. */
   const again = () => trade && compare(trade, trade.picked);
-  return { trade, best, busy, error, setBusy, start, fail, show, compare, again };
+  /** Send this order to the cheaper venue with fake money: the SDK's buy_best(), as a test. */
+  async function testOrder() {
+    if (!trade) return;
+    setTest({ busy: true });
+    try {
+      const r = await getJson<BestResult>("/engine/best/test", post(orderOf(trade)));
+      setTest({ line: r.fill_line ?? "" });
+      traded();
+    } catch (e) {
+      setTest({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { trade, best, busy, error, test, setBusy, start, fail, show, compare, again, testOrder };
+}
+
+type TestOrder = null | { busy?: boolean; line?: string; error?: string };
+
+/** The one SDK call that routes this order in your own bot. */
+const sdkCall = (t: Signal) =>
+  `client.buy_best(pair, "${t.side}", ${t.spend != null ? `spend=${t.spend}` : t.size}${t.spend == null && t.max_price != null ? `, max_price=${t.max_price}` : ""})`;
+
+/** The test button: this order on the cheaper venue, with fake money, and the SDK call that does it for real. */
+function TestBox({ t, mode }: { t: Trade; mode: string }) {
+  const { trade, test } = t;
+  if (!trade) return null;
+  return (
+    <div className="test-box">
+      <div className="test-head">
+        <span className="pill">Test</span> Try this order with fake money
+      </div>
+      <p className="small muted">
+        It goes to the venue that wins more above and fills against that venue&apos;s real order book a moment after you click, like a
+        real order. No money moves and nothing reaches Kalshi or Polymarket US.
+      </p>
+      {mode === "paper" ? (
+        <button className="btn" onClick={t.testOrder} disabled={!!test?.busy}>
+          {test?.busy ? "Sending test order…" : "Test this order (fake money)"}
+        </button>
+      ) : (
+        <p className="small">The test button uses fake money only. Set BOT_MODE=paper in .env and restart to use it.</p>
+      )}
+      {test?.line && <p className="test-line">{test.line}</p>}
+      {test?.error && <p className="error">{test.error}</p>}
+      <p className="small test-sdk">
+        To route real trades from your own bot, the uselayer SDK does this in one call:{" "}
+        <code>{sdkCall(trade)}</code>.{" "}
+        <a href="https://uselayer.sh/docs/sdk" target="_blank" rel="noreferrer">
+          SDK docs ↗
+        </a>
+      </p>
+    </div>
+  );
 }
 
 type Trade = ReturnType<typeof useTrade>;
@@ -309,8 +365,8 @@ function TryAgain({ onClick, busy }: { onClick: () => void; busy: boolean }) {
   );
 }
 
-/** The match, the two venues' markets, then the answer. Numbers folded below. Nothing is sent from here. */
-function TradeResult({ t }: { t: Trade }) {
+/** The match, the two venues' markets, then the answer and the test button. Numbers folded below. */
+function TradeResult({ t, mode }: { t: Trade; mode: string }) {
   const { trade, best, busy } = t;
   const ref = useShowWhenReady(best);
   if (!trade || !best) return null;
@@ -351,6 +407,7 @@ function TradeResult({ t }: { t: Trade }) {
           )}
         </>
       )}
+      {c?.cheaper && !h?.retry && <TestBox t={t} mode={mode} />}
       {c && !h?.retry && (
         <details className="fold">
           <summary>Price, fees and size on each venue</summary>
@@ -520,7 +577,7 @@ function GamePicker({
   );
 }
 
-function ManualMode() {
+function ManualMode({ mode }: { mode: string }) {
   const t = useTrade();
   const [loaded, setLoaded] = useState<Game[] | null>(null); // the first list, to pick the soonest game
   const [current, setCurrent] = useState<Game | null>(null);
@@ -601,7 +658,7 @@ function ManualMode() {
         </>
       )}
       <Working t={t} />
-      <TradeResult t={t} />
+      <TradeResult t={t} mode={mode} />
     </>
   );
 }
@@ -636,7 +693,7 @@ function EveryPrice({ r, venue }: { r: EveryRow; venue: "kalshi" | "polymarket_u
   );
 }
 
-function EveryMarketMode() {
+function EveryMarketMode({ mode }: { mode: string }) {
   const t = useTrade();
   const [category, setCategory] = useState<string>("sports");
   const [spend, setSpend] = useState(EVERY_SPEND);
@@ -758,7 +815,7 @@ function EveryMarketMode() {
                 </button>
                 {open === r.match.id && (
                   <>
-                    <TradeResult t={t} />
+                    <TradeResult t={t} mode={mode} />
                     {t.error && <p className="error">{t.error}</p>}
                   </>
                 )}
@@ -771,7 +828,7 @@ function EveryMarketMode() {
   );
 }
 
-export default function BestVenue() {
+export default function BestVenue({ mode }: { mode: string }) {
   const [how, setHow] = useState<How>(DEFAULT_HOW);
   return (
     <section>
@@ -785,10 +842,10 @@ export default function BestVenue() {
       </div>
       {/* Each stays mounted, with its own trade: switching never shows another mode's result. */}
       <div hidden={how !== "manual"}>
-        <ManualMode />
+        <ManualMode mode={mode} />
       </div>
       <div hidden={how !== "every"}>
-        <EveryMarketMode />
+        <EveryMarketMode mode={mode} />
       </div>
     </section>
   );

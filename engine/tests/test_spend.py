@@ -313,3 +313,67 @@ def test_preview_in_dollars_keeps_the_max_price(engine) -> None:  # noqa: ANN001
     c = body["compare"]
     assert c["max_price"] == 0.42 and c["cheaper"] == "polymarket_us"
     assert not venue(c, "kalshi")["contracts"]
+
+
+# --- the test button (POST /best/test): buy_best() with fake money, paper only ----------------------
+
+
+def test_the_test_button_buys_where_the_money_wins_more(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    r, bc = sdk_spend(50, [(0.45, 5000)], [(0.40, 5000)], buy=True)
+    asked: dict = {}
+
+    class Sdk:
+        rules = bc.rules
+
+        def buy_best(self, *a, **kw):  # noqa: ANN002, ANN003, ANN202
+            asked.update(args=a, kw=kw)
+            return r
+
+    monkeypatch.setattr(engine, "client", lambda: Sdk())
+    res = local(engine.app).post("/best/test", json={"match_id": K, "side": "yes", "spend": 50})
+    assert res.status_code == 200, res.text
+    assert asked["args"][1:] == ("yes", None) and asked["kw"] == {"max_price": None, "spend": 50.0}
+    body = res.json()
+    o = r.order
+    assert body["mode"] == "paper" and body["order"]["venue"] == "polymarket_us"
+    assert body["fill_line"] == (
+        f"Filled {o.filled:,g} YES on Polymarket US at 40¢ average: {money_label(o.filled * o.avg_price + o.fees)}, fees included."
+    )
+    assert SECRET not in json.dumps(body)
+
+
+def test_the_test_button_never_sends_a_real_order(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from dataclasses import replace
+
+    def boom():  # noqa: ANN202
+        raise AssertionError("no client in live mode")
+
+    monkeypatch.setattr(engine, "settings", replace(engine.settings, mode="live"))
+    monkeypatch.setattr(engine, "client", boom)
+    res = local(engine.app).post("/best/test", json={"match_id": K, "side": "yes", "spend": 50})
+    assert res.status_code == 403 and "fake money only" in res.text
+
+
+def test_the_test_button_says_when_the_price_moved_or_ran_out() -> None:
+    from spread_engine.views import test_fill_line
+
+    def result(filled: float) -> SimpleNamespace:
+        o = SimpleNamespace(venue="kalshi", side="yes", size=100, filled=filled, avg_price=0.5 if filled else None, fees=0.9 if filled else None)
+        return SimpleNamespace(sent=True, order=o, why=None)
+
+    assert test_fill_line(result(0), 0.7).startswith("Nothing filled on Kalshi: the price moved in the 0.7 seconds")
+    assert test_fill_line(result(60), 0.7) == (
+        "Filled 60 YES on Kalshi at 50¢ average: $30.90, fees included. The other 40 were gone by the time it arrived."
+    )
+
+
+def test_the_test_button_says_what_blocked_it(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    class Sdk:
+        def buy_best(self, *a, **kw):  # noqa: ANN002, ANN003, ANN202
+            e = VenueError("blocked_by_rule", "budget")
+            e.rule = "budget"
+            raise e
+
+    monkeypatch.setattr(engine, "client", lambda: Sdk())
+    res = local(engine.app).post("/best/test", json={"match_id": K, "side": "yes", "spend": 50})
+    assert res.status_code == 409 and "over its limit" in res.json()["detail"]

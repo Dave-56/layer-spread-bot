@@ -44,7 +44,7 @@ from . import spend as by_dollar
 from .funnel import ScanSettings, quote_view, scan
 from .reads import GatewayReads, cached_books
 from .strategies import upcoming
-from .views import _time, busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_reasons, rule_warning, trade_error
+from .views import _time, busy_sentence, compare_view, error_line, error_view, match_id, match_view, over, rule_reasons, rule_warning, test_fill_line, trade_error
 
 settings = config.load()
 app = FastAPI(title="Spread bot engine", docs_url=None, redoc_url=None)
@@ -416,6 +416,24 @@ def best_buy(b: BestBody) -> dict[str, Any]:
     m = _find(b.match_id)
     r = client().buy_best(m, b.side, b.size, max_price=b.max_price, spend=b.spend)
     return {"mode": settings.mode, **_best_view(m, r)}
+
+
+@app.post("/best/test")
+def best_test(b: BestBody) -> dict[str, Any]:
+    """The Best venue screen's test button: the SDK's ``buy_best()`` with fake money, against the venues'
+    real books. Paper only, whatever BOT_MODE says: the app never sends a real order from this screen."""
+    if settings.mode != "paper":
+        raise HTTPException(403, "The test button uses fake money only. Set BOT_MODE=paper in .env and restart to use it.")
+    m = _find(b.match_id)
+    try:
+        r = client().buy_best(m, b.side, b.size, max_price=b.max_price, spend=b.spend)
+    except VenueError as e:
+        raise HTTPException(409, trade_error(e)) from e
+    return {
+        "mode": "paper",
+        **_best_view(m, r),
+        "fill_line": test_fill_line(r, settings.order_latency_s),
+    }
 
 
 class EveryMarketBody(BaseModel):

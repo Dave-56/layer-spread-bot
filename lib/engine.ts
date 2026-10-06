@@ -119,6 +119,7 @@ export interface BestResult {
   compare?: CompareView;
   preview?: PreviewView | null;
   mode?: string;
+  fill_line?: string; // the test button's result, one sentence in dollars (POST /best/test)
 }
 
 // Best venue, named and labelled for the screen (engine/spread_engine/views.py compare_view). Every
