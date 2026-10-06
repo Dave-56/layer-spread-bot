@@ -363,20 +363,36 @@ def _venue_row(v: Any, chosen: str | None, limit: float | None = None) -> dict[s
     }
 
 
+def dollars(x: float) -> str:
+    """$50, $49.98: whole dollars without cents."""
+    return f"${x:,.0f}" if abs(x - round(x)) < 0.005 else money_label(x)  # type: ignore[return-value]
+
+
 def verdict_line(why: Any) -> str:
-    """The SDK's comparison as one sentence, from its own numbers."""
+    """The SDK's comparison as one sentence, from its own numbers. A buy by dollars (``why.spend``)
+    has each venue at its own size."""
     chosen = why.chosen
-    size = f"{why.size:,g}"
+    spend = getattr(why, "spend", None)
     unknown = [v.venue for v in why.venues if v.skip in UNKNOWN_SKIPS]
     if unknown:
         return busy_sentence(unknown)
     if chosen is None:
+        if spend is not None:
+            return f"No trade: neither venue can take {dollars(spend)} on {why.side.upper()} right now."
         return "No trade: neither venue can fill this order right now."
+    size = f"{why.size:,g}"
     name = VENUE_NAMES.get(chosen.venue, chosen.venue)
     other = next((v for v in why.venues if v.venue != chosen.venue and v.ok), None)
     total = money_label(chosen.all_in)
+    if spend is not None and other is None:
+        return f"Only {name} can take {dollars(spend)}: {size} {why.side.upper()} for {total}, fees included."
     if other is None:
         return f"Only {name} can fill {size} contracts: {total}, fees included."
+    if why.reason_code == "wins_more":
+        return (
+            f"{name} wins {dollars(why.saving)} more if you're right: your {dollars(spend)} buys {size} {why.side.upper()} "
+            f"there for {total}, vs {other.size:,g} for {money_label(other.all_in)} on {VENUE_NAMES.get(other.venue, other.venue)}, fees included."
+        )
     if why.reason_code == "tie_more_size":
         return f"Same price on both ({total} for {size}, fees included). {name} has more for sale, so it goes there."
     if why.reason_code == "tie_first_listed":

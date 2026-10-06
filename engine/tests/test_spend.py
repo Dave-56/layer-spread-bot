@@ -204,6 +204,58 @@ def test_preview_takes_size_or_spend_not_both(engine, extra) -> None:  # noqa: A
     assert r.status_code == 422
 
 
-def test_buying_still_takes_contracts(engine) -> None:  # noqa: ANN001
-    r = local(engine.app).post("/best/buy", json={"match_id": K, "side": "yes", "spend": 50})
+def sdk_spend(amount: float, k_asks: list[tuple[float, float]], pm_asks: list[tuple[float, float]], *, buy: bool):  # noqa: ANN201
+    """The SDK's own buy_best(spend=) (or preview_best), in backtest mode on made-up books, and its client."""
+    from uselayer import Client
+
+    m = Match.model_validate(MATCH)
+    books = [book("kalshi", K, k_asks), book("polymarket_us", PM, pm_asks)]
+    out: dict = {}
+
+    def on_book(bc: Client, b: Book) -> None:
+        out["seen"] = out.get("seen", 0) + 1
+        if out["seen"] == len(books):
+            out["r"] = (bc.buy_best if buy else bc.preview_best)(m, "yes", spend=amount)
+            out["client"] = bc
+
+    Client(mode="backtest", books=books, store=":memory:", on_alert=lambda e: None).replay(on_book)
+    return out["r"], out["client"]
+
+
+def test_buying_takes_dollars_and_goes_where_they_win_more(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    r, bc = sdk_spend(50, [(0.45, 5000)], [(0.40, 5000)], buy=True)
+    asked: dict = {}
+
+    class Sdk:
+        rules = bc.rules
+
+        def buy_best(self, *a, **kw):  # noqa: ANN002, ANN003, ANN202
+            asked.update(args=a, kw=kw)
+            return r
+
+    monkeypatch.setattr(engine, "client", lambda: Sdk())
+    res = local(engine.app).post("/best/buy", json={"match_id": K, "side": "yes", "spend": 50})
+    assert res.status_code == 200, res.text
+    assert asked["args"][1:] == ("yes", None) and asked["kw"] == {"max_price": None, "spend": 50.0}
+    body = res.json()
+    k, pm = r.why.venues
+    assert (body["sent"], body["why"]["spend"], body["why"]["reason_code"]) == (True, 50, "wins_more")
+    assert (body["order"]["venue"], body["order"]["size"]) == ("polymarket_us", pm.size) and pm.size > k.size
+    assert body["compare"]["verdict"] == (
+        f"Polymarket US wins ${pm.size - k.size:,.0f} more if you're right: your $50 buys {pm.size:,g} YES there for "
+        f"${pm.all_in:,.2f}, vs {k.size:,g} for ${k.all_in:,.2f} on Kalshi, fees included."
+    )
+    assert SECRET not in json.dumps(body)
+
+
+def test_too_little_to_buy_says_so_in_dollars() -> None:
+    from spread_engine.views import verdict_line
+
+    r, _ = sdk_spend(0.3, [(0.45, 5000)], [(0.40, 5000)], buy=False)
+    assert r.why.size is None and r.order is None
+    assert verdict_line(r.why) == "No trade: neither venue can take $0.30 on YES right now."
+
+
+def test_buying_takes_size_or_spend_not_both(engine) -> None:  # noqa: ANN001
+    r = local(engine.app).post("/best/buy", json={"match_id": K, "side": "yes", "size": 10, "spend": 50})
     assert r.status_code == 422

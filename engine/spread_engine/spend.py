@@ -21,6 +21,7 @@ from .views import (
     _venue_row,
     busy_sentence,
     cents_label,
+    dollars,
     money_label,
     pair_view,
     plain_error,
@@ -30,11 +31,6 @@ VENUES = ("kalshi", "polymarket_us")
 MAX_SPEND = 100_000.0
 
 Pricer = Callable[[int], Any]  # a whole number of contracts → the SDK's comparison at that size (BestVenue)
-
-
-def dollars(x: float) -> str:
-    """$50, $49.98: whole dollars without cents."""
-    return f"${x:,.0f}" if abs(x - round(x)) < 0.005 else money_label(x)  # type: ignore[return-value]
 
 
 def _row(price: Pricer, venue: str, n: int) -> Any:
