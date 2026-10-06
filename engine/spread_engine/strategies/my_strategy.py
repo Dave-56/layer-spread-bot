@@ -30,9 +30,10 @@ def decide(matches: list[Match], client: Client) -> Signal | NoTrade | None:
     #     with both venues' prices (a 1¢ or 99¢ YES ask is skipped as no real price)
     #   cheapest(p, "yes"), soonest(matches), game_winner(m), starts_at(m), closes_at(m)
     #
-    # Write your logic here: which market, YES or NO, how many contracts, and the most you'll pay.
+    # Write your logic here: which market, YES or NO, how much to spend in dollars, and the most you'll
+    # pay a contract. The SDK works out how many contracts your amount buys on each venue.
     #
     # for m, p in priced(matches, client):
     #     if <your condition on m and p>:
-    #         return Signal(m, "yes", 50, max_price=0.60, why="<one line on why>")
+    #         return Signal(m, "yes", 50, max_price=0.60, why="<one line on why>")  # $50 on YES
     return NoTrade("This is the template: write your logic in strategies/my_strategy.py.")

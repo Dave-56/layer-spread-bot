@@ -8,7 +8,7 @@ from . import CRYPTO, NoTrade, Signal, cheapest, closes_at, hours_until, outcome
 
 NAME = "Crypto: nearly decided, last 3 days"
 CATEGORY = CRYPTO
-DESCRIPTION = 'Price-line markets ("BTC above $X on a date") closing within 3 days: buys 100 of the side priced 90¢ to 97¢, paying at most 97¢.'
+DESCRIPTION = 'Price-line markets ("BTC above $X on a date") closing within 3 days: puts $50 on the side priced 90¢ to 97¢, paying at most 97¢.'
 EXAMPLE = True
 ORDER = 10
 LAYER_CATEGORIES = ("crypto",)
@@ -28,5 +28,5 @@ def decide(matches: list[Match], client: Client) -> Signal | NoTrade:
             ask = cheapest(p, side)
             if ask is not None and LOW <= ask <= HIGH:
                 days = (hours_until(closes_at(m)) or 0) / 24
-                return Signal(m, side, 100, max_price=HIGH, why=f"{side.upper()} on {outcome(m)} costs {price_words(ask)} with {days:.1f} days left.")
+                return Signal(m, side, 50, max_price=HIGH, why=f"{side.upper()} on {outcome(m)} costs {price_words(ask)} with {days:.1f} days left.")
     return NoTrade(f"No crypto market closing in the next {DAYS} days has a side priced between 90¢ and 97¢ right now.")

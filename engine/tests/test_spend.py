@@ -295,3 +295,21 @@ def test_too_little_to_buy_says_so_in_dollars() -> None:
 def test_buying_takes_size_or_spend_not_both(engine) -> None:  # noqa: ANN001
     r = local(engine.app).post("/best/buy", json={"match_id": K, "side": "yes", "size": 10, "spend": 50})
     assert r.status_code == 422
+
+
+def test_max_price_caps_what_the_amount_buys() -> None:
+    # $50: 50 YES at 40¢, then 43¢ (inside the price collar). Uncapped, the money reaches 43¢; capped at 41¢ it can't.
+    asks = [(0.40, 50), (0.43, 5000)]
+    free = venue(view(50, asks, asks), "kalshi")
+    capped = view(50, asks, asks, max_price=0.41)
+    assert free["contracts"] > 50
+    assert capped["max_price"] == 0.41
+    assert all((venue(capped, v)["contracts"] or 0) <= 50 for v in ("kalshi", "polymarket_us"))
+
+
+def test_preview_in_dollars_keeps_the_max_price(engine) -> None:  # noqa: ANN001
+    # Kalshi's YES is 45¢, Polymarket US's 40¢: with a 42¢ cap only Polymarket US can take the $50.
+    body = local(engine.app).post("/best/preview", json={"match_id": K, "side": "yes", "spend": 50, "max_price": 0.42}).json()
+    c = body["compare"]
+    assert c["max_price"] == 0.42 and c["cheaper"] == "polymarket_us"
+    assert not venue(c, "kalshi")["contracts"]

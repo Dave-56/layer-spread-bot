@@ -8,7 +8,7 @@ from . import SPORTS, NoTrade, Signal, cheapest, event, game_winner, outcome, pr
 
 NAME = "Back the favorite"
 CATEGORY = SPORTS
-DESCRIPTION = "Next game first: buys 100 YES on the side the market prices between 55¢ and 85¢, paying at most 85¢."
+DESCRIPTION = "Next game first: puts $50 on YES for the side the market prices between 55¢ and 85¢, paying at most 85¢."
 EXAMPLE = True
 ORDER = 10
 LAYER_CATEGORIES = ("sports",)
@@ -23,5 +23,5 @@ def decide(matches: list[Match], client: Client) -> Signal | NoTrade:
     for m, p in priced(games, client):
         yes = cheapest(p, "yes")
         if yes is not None and LOW <= yes <= HIGH:
-            return Signal(m, "yes", 100, max_price=HIGH, why=f"{outcome(m)} is the favorite in {event(m)}: YES costs {price_words(yes)}.")
+            return Signal(m, "yes", 50, max_price=HIGH, why=f"{outcome(m)} is the favorite in {event(m)}: YES costs {price_words(yes)}.")
     return NoTrade("None of the next games has a favorite priced between 55¢ and 85¢ right now.")
