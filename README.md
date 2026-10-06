@@ -64,7 +64,7 @@ Once http://127.0.0.1:3200 is open. Everything here uses real order books and fa
 
 ## Strategies
 
-The Best venue screen opens on "Search a game". The Game box lists the soonest open games; each letter you type narrows that list at once, and after a short pause it searches every open game ("Searching all games…" shows until it answers). Pick the outcome, YES or NO and contracts (100 to start), and compare. "Every market" is next to it.
+The Best venue screen opens on "Search a game". The Game box lists the soonest open games; each letter you type narrows that list at once, and after a short pause it searches every open game ("Searching all games…" shows until it answers). Pick the outcome, YES or NO and an amount in dollars ($50 to start), and compare. "Every market" is next to it.
 
 Your strategy decides the trade; the bot finds the cheaper venue for it. Strategies run from code, not from a screen: each one is a file in `engine/spread_engine/strategies/`, listed by the engine's `GET /strategies` and run with `GET /best/signal`.
 
