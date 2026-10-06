@@ -408,10 +408,9 @@ def best_preview(b: BestBody) -> dict[str, Any]:
 
 @app.post("/best/buy")
 def best_buy(b: BestBody) -> dict[str, Any]:
-    if b.size is None:
-        raise HTTPException(422, "Buying takes a number of contracts (size).")
+    """Contracts, or dollars: the SDK sizes ``spend`` on each venue and buys where it wins more."""
     m = _find(b.match_id)
-    r = client().buy_best(m, b.side, b.size, max_price=b.max_price)
+    r = client().buy_best(m, b.side, b.size, max_price=b.max_price, spend=b.spend)
     return {"mode": settings.mode, **_best_view(m, r)}
 
 
