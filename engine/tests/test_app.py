@@ -246,6 +246,34 @@ def test_a_strategy_that_picks_a_match_worded_differently_shows_the_warning(engi
     assert sig["match"]["rule_warning"].startswith("Rules differ slightly on when the result is checked")
 
 
+def test_a_strategy_signal_is_dollars_and_keeps_its_max_price(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    from types import SimpleNamespace
+
+    from spread_engine.strategies import Signal
+
+    mt = _caveat_match()
+    monkeypatch.setattr(engine, "_list_in", lambda *a, **k: ([mt], 0))
+    monkeypatch.setattr(engine, "client", lambda: None)
+    pick = SimpleNamespace(decide=lambda ms, c: Signal(ms[0], "yes", 50, max_price=0.85, why="made up"))
+    monkeypatch.setattr(engine.strategies, "module", lambda sid: pick)
+    seen: list = []
+    monkeypatch.setattr(engine, "_spend", lambda m, side, amount, max_price=None: seen.append((side, amount, max_price)) or {"ok": True})
+    sig = local(engine.app).get("/best/signal", params={"strategy": "any"}).json()["signal"]
+    assert (sig["spend"], sig["size"], sig["max_price"]) == (50, None, 0.85)
+    assert seen == [("yes", 50, 0.85)]  # priced in dollars, never above the strategy's max price
+
+
+def test_a_signal_takes_dollars_or_contracts_not_both() -> None:
+    from spread_engine.strategies import Signal
+
+    m = _caveat_match()
+    assert Signal(m, "yes", 50).amount == 50
+    assert Signal(m, "yes", size=100).size == 100
+    for bad in ({}, {"amount": 50, "size": 100}):
+        with pytest.raises(ValueError, match="amount in dollars"):
+            Signal(m, "yes", **bad)
+
+
 def test_paper_trade_result_carries_the_warning(engine, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
     from datetime import UTC, datetime
 

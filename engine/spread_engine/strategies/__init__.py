@@ -50,13 +50,18 @@ STARTER = "my_strategy"
 
 @dataclass(frozen=True)
 class Signal:
-    """The trade your strategy wants."""
+    """The trade your strategy wants: ``Signal(m, "yes", 50)`` is $50 on YES."""
 
     match: Match  # the market (one of the matches you were given)
     side: str  # "yes" or "no": the outcome both venues' markets name
-    size: int  # contracts
+    amount: float | None = None  # dollars to spend; the SDK works out how many contracts that buys on each venue
     max_price: float | None = None  # never pay more than this a contract, in dollars (None: the SDK's price collar)
     why: str = ""  # one line, shown in the app: why your strategy picked this
+    size: int | None = None  # contracts instead of dollars, if your strategy really thinks in contracts
+
+    def __post_init__(self) -> None:
+        if (self.amount is None) == (self.size is None):
+            raise ValueError("A Signal needs an amount in dollars (or size= in contracts), not both.")
 
 
 @dataclass(frozen=True)

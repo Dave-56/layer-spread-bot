@@ -357,7 +357,7 @@ def best_signal(strategy: str = "sports_favorite", q: str | None = None, categor
         sig = mod.decide(ms, client())
         if isinstance(sig, strategies.Signal):
             _matches[match_id(sig.match)] = sig.match
-            body = BestBody(match_id=match_id(sig.match), side=sig.side, size=sig.size, max_price=sig.max_price)
+            body = BestBody(match_id=match_id(sig.match), side=sig.side, size=sig.size, spend=sig.amount, max_price=sig.max_price)
             return {
                 "signal": {**body.model_dump(), "why": sig.why, "match": match_view(sig.match)},
                 "matches": len(ms),
@@ -389,16 +389,18 @@ def _price(m: Match, side: str, size: int, max_price: float | None = None) -> di
 
 def _preview(b: BestBody) -> dict[str, Any]:
     if b.spend is not None:
-        return _spend(_find(b.match_id), b.side, b.spend)
+        return _spend(_find(b.match_id), b.side, b.spend, b.max_price)
     return _price(_find(b.match_id), b.side, b.size, b.max_price)  # type: ignore[arg-type]
 
 
-def _spend(m: Match, side: str, amount: float) -> dict[str, Any]:
+def _spend(m: Match, side: str, amount: float, max_price: float | None = None) -> dict[str, Any]:
     """``amount`` dollars on ``side``: the most each venue sells for it, and which pays more if you win.
     Each book is read once; every size is then priced by the SDK against those books (spend.py)."""
     c = client()
     books, failed = by_dollar.read_books(c, m)
-    view = by_dollar.books_view(m, side, amount, books, rules=c.rules, failed=failed, collar=c.rules.price_collar)
+    view = by_dollar.books_view(
+        m, side, amount, books, rules=c.rules, failed=failed, collar=c.rules.price_collar, max_price=max_price
+    )
     return {"ok": True, "compare": view}
 
 

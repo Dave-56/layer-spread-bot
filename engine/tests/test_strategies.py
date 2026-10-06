@@ -117,7 +117,7 @@ def test_back_the_favorite_takes_the_next_game_and_skips_spreads() -> None:
     c = _Client({"LATER": (0.70, 0.71), "SPREAD": (0.60, 0.61), "SOON-DOG": (0.35, 0.36), "SOON-FAV": (0.66, 0.65)})
     sig = run("sports_favorite", ms, c)
     assert isinstance(sig, Signal) and sig.match.kalshi.market_id == "SOON-FAV"
-    assert (sig.side, sig.size, sig.max_price) == ("yes", 100, 0.85)
+    assert (sig.side, sig.amount, sig.size, sig.max_price) == ("yes", 50, None, 0.85)
     assert "65¢ (65%)" in sig.why and "SPREAD" not in c.read
 
 

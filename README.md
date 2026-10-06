@@ -52,10 +52,10 @@ Keys in `.env`:
 
 Once http://127.0.0.1:3200 is open. Everything here uses real order books and fake money.
 
-- **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and an amount in dollars, and press **Compare venues**. You see what that amount wins on each venue if you're right, fees included, and which one pays more. Each venue gets its own size: the most whole contracts the amount buys there. This tab never sends an order.
-- **Best venue → Every market.** Pick a group of markets and an amount in dollars ($50 to start) and press **Check every market**. Each of the next 25 markets is compared for that amount on YES, the biggest difference in what you'd win first.
-- **Arbitrage → Live.** Press **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. When a gap survives, press **Paper-trade both sides**.
-- **Arbitrage → Replay.** Pick a game that's on now and press **Save prices**. When it's done, press **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
+- **Best venue → Search a game.** Type a team or league in the Game box and pick a game, then an outcome, YES or NO and an amount in dollars, and click **Compare venues**. You see what that amount wins on each venue if you're right, fees included, and which one pays more. Each venue gets its own size: the most whole contracts the amount buys there. This tab never sends an order.
+- **Best venue → Every market.** Pick a group of markets and an amount in dollars ($50 to start) and click **Check every market**. Each of the next 25 markets is compared for that amount on YES, the biggest difference in what you'd win first.
+- **Arbitrage → Live.** Click **Scan** (about two minutes for 50 markets). The answer comes first: how many gaps are still money after fees, or why none is. If a gap is still profit after fees, click **Paper-trade both sides** to buy YES on one venue and NO on the other with fake money.
+- **Arbitrage → Replay.** Pick a game that's on now and click **Save prices**. When it's done, click **Replay** to see whether a gap would have made money after fees (see [Replay prices you saved](#replay-prices-you-saved)).
 - **Paper account.** After a paper trade, a line at the top of the Arbitrage tab shows what's open. **Reset** starts the fake account over.
 
 ## Strategies
@@ -68,11 +68,11 @@ It comes with examples named the way people trade. They're examples, not advice:
 
 | Category | Example | What it buys |
 |---|---|---|
-| Sports | Back the favorite | Next game first: 100 YES on the side priced 55¢–85¢, at most 85¢ |
-| Sports | Longshot under 20¢ | Next game first: 100 YES on an underdog under 20¢, at most 20¢ |
-| Sports | Game day: favorite in the last 6 hours | Games starting within 6 hours: 100 YES on the side priced 55¢–90¢, at most 90¢ |
-| Crypto | Crypto: nearly decided, last 3 days | Price-line markets closing within 3 days: 100 of the side priced 90¢–97¢, at most 97¢ |
-| News, politics & economics | Nearly decided, last 7 days | Markets closing within 7 days: 100 of the side priced 90¢–97¢, at most 97¢ |
+| Sports | Back the favorite | Next game first: $50 on YES for the side priced 55¢–85¢, at most 85¢ |
+| Sports | Longshot under 20¢ | Next game first: $50 on YES for an underdog under 20¢, at most 20¢ |
+| Sports | Game day: favorite in the last 6 hours | Games starting within 6 hours: $50 on YES for the side priced 55¢–90¢, at most 90¢ |
+| Crypto | Crypto: nearly decided, last 3 days | Price-line markets closing within 3 days: $50 on the side priced 90¢–97¢, at most 97¢ |
+| News, politics & economics | Nearly decided, last 7 days | Markets closing within 7 days: $50 on the side priced 90¢–97¢, at most 97¢ |
 
 Each one looks only at markets that are open on both venues, worded the same on both, with a real price on each (a 1¢ or 99¢ YES is skipped). When nothing fits, it says why in one sentence, e.g. "No trade: Layer has no crypto markets matched on both Kalshi and Polymarket US right now."
 
@@ -81,7 +81,7 @@ Each one looks only at markets that are open on both venues, worded the same on 
 ### Add your own
 
 1. Start from the starter file: `cp engine/spread_engine/strategies/my_strategy.py engine/spread_engine/strategies/momentum.py`.
-2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how many contracts, the most you'll pay.
+2. Give it a `NAME`, a `CATEGORY` and a one-line `DESCRIPTION`, and write `decide()`: which market, YES or NO, how much in dollars, and the most you'll pay a contract. `Signal(m, "yes", 50)` is $50 on YES; the SDK works out how many contracts that buys on each venue.
 3. Run it against the engine: `curl "http://127.0.0.1:8765/best/signal?strategy=momentum"`. Edits to a strategy apply on the next run, without a restart.
 
 The starter file itself isn't in the list, since it never trades.
@@ -91,22 +91,22 @@ from . import SPORTS, NoTrade, Signal, priced
 
 NAME = "Momentum: buy YES under 40¢"
 CATEGORY = SPORTS
-DESCRIPTION = "Buys 50 YES when it's under 40¢ on both venues."
+DESCRIPTION = "Puts $50 on YES when it's under 40¢ on both venues."
 
 def decide(matches, client):
     for m, p in priced(matches, client):          # upcoming, open and worded the same on both venues, with both prices
         if p.a.yes_ask < 0.40 and p.b.yes_ask < 0.40:
-            return Signal(m, "yes", 50, max_price=0.40, why="YES is under 40¢ on both venues.")
+            return Signal(m, "yes", 50, max_price=0.40, why="YES is under 40¢ on both venues.")  # $50 on YES
     return NoTrade("Nothing is under 40¢ on both venues right now.")
 ```
 
 `client` is the uselayer SDK with your keys, so a strategy can read anything: `client.prices(m)`, `client.book(m.kalshi)`. `LAYER_CATEGORIES = ("crypto",)` in the file asks Layer for those categories only. The helpers (`priced`, `cheapest`, `soonest`, `game_winner`, `starts_at`, `closes_at`) are in `strategies/__init__.py`.
 
-A strategy file is your own Python, run by the engine on your machine with your keys, like any script you run yourself. Adding one from the app saves it into `strategies/` and imports it once to check that it loads and has `decide()`; if not, the file is removed and you see why. The engine answers only this machine (`127.0.0.1`), so nobody else can add a file. Only add code you wrote or have read.
+A strategy file is your own Python, run by the engine on your machine with your keys, like any script you run yourself. Adding one through the engine (`POST /strategies`) saves it into `strategies/` and imports it once to check that it loads and has `decide()`; if not, the file is removed and you see why. The engine answers only this machine (`127.0.0.1`), so nobody else can add a file. Only add code you wrote or have read.
 
 ## Your keys stay on your machine
 
-- `.env` is git-ignored. Each key is read by the SDK and sent only to its own service: the Kalshi key to Kalshi, the Polymarket US key to Polymarket US, the Layer key to Layer, the LLM key to your LLM provider.
+- `.env` is git-ignored. Each key is read by the SDK and sent only to its own service: the Kalshi key to Kalshi, the Polymarket US key to Polymarket US, the Layer key to Layer.
 - No key is logged, shown in the app, or returned by the engine. `/status` reports only which keys are set (yes/no).
 - The engine listens on `127.0.0.1` and refuses requests from any other machine.
 
@@ -119,7 +119,7 @@ A strategy file is your own Python, run by the engine on your machine with your 
 
 ## How the arbitrage scan works
 
-Press **Scan**. Settings (folded) holds the search, contracts (100), minimum profit a contract (0¢), minimum return a day (0%) and how many markets (50). A scan of 50 takes about two minutes: Polymarket US asks for a pause when its books are read often, and the SDK waits for it.
+Click **Scan**. Settings (folded) holds the search, contracts (100), minimum profit a contract (0¢), minimum return a day (0%) and how many markets (50). A scan of 50 takes about two minutes: Polymarket US asks for a pause when its books are read often, and the SDK waits for it.
 
 The answer comes first: "2 of 50 gaps are still money after fees", or one sentence saying why none is, e.g. "No trade: 46 of 50 have no gap, 3 lose the gap to fees and 1 has nobody selling on one venue."
 
@@ -148,8 +148,8 @@ Replay re-runs prices you saved from a live game, moment by moment, to show whet
 Nothing comes pre-saved: Kalshi's and Polymarket US's terms don't let this repo ship their prices, so you save your own. On the Arbitrage screen, switch to **Replay**:
 
 1. Under **Save prices**, pick a game (games on now are listed first, since that's when prices move) and how long to save (30 minutes unless you pick otherwise).
-2. Press **Save prices**. Both venues' books for that game are saved while it trades, every change. You see the market, the time left and how many price updates are saved so far. **Stop** ends it early and keeps what's saved.
-3. When it ends, the new file is selected under **Saved prices**. Press **Replay**.
+2. Click **Save prices**. Both venues' books for that game are saved while it trades, every change. You see the market, the time left and how many price updates are saved so far. **Stop** ends it early and keeps what's saved.
+3. When it ends, the new file is selected under **Saved prices**. Click **Replay**.
 
 One recording runs at a time, for as long as the app is running. Saving prices needs your Layer key, your Kalshi key (`KALSHI_KEY_ID` and `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY`) and your Polymarket US key (`POLYMARKET_US_KEY_ID` and `POLYMARKET_US_SECRET_KEY`): each venue's live stream is read with your own key, and nothing is traded. Files go to `recordings/` (not committed), with the match saved next to them.
 

@@ -84,6 +84,7 @@ def spend_view(
     *,
     failed: dict[str, VenueError] | None = None,
     collar: float | None = None,
+    max_price: float | None = None,
 ) -> dict[str, Any]:
     """``spend`` dollars on ``side`` of ``m``, on each venue at its own size, labelled for the app.
 
@@ -160,7 +161,7 @@ def spend_view(
         "size": None,
         "spend": spend,
         "spend_label": dollars(spend),
-        "max_price": None,
+        "max_price": max_price,
         "pair": pair_view(m),
         "venues": rows,
         "cheaper": chosen,
@@ -230,12 +231,21 @@ def _headline(spend: float, side: str, rows: list[dict[str, Any]], chosen: str |
 
 
 def books_view(
-    m: Match, side: str, spend: float, books: Iterable[Any], *, rules: Any = None, failed: dict[str, VenueError] | None = None, collar: float | None = None
+    m: Match,
+    side: str,
+    spend: float,
+    books: Iterable[Any],
+    *,
+    rules: Any = None,
+    failed: dict[str, VenueError] | None = None,
+    collar: float | None = None,
+    max_price: float | None = None,
 ) -> dict[str, Any]:
-    """:func:`spend_view` priced against ``books`` (each venue's latest), in the SDK's backtest mode."""
+    """:func:`spend_view` priced against ``books`` (each venue's latest), in the SDK's backtest mode.
+    ``max_price`` caps what a contract may cost on either venue (a strategy's limit)."""
     books = list(books)
     if not books:
-        return spend_view(m, side, spend, None, failed=failed, collar=collar)
+        return spend_view(m, side, spend, None, failed=failed, collar=collar, max_price=max_price)
     out: dict[str, Any] = {}
     seen: set[tuple[str, str]] = set()
 
@@ -246,10 +256,10 @@ def books_view(
 
             def price(n: int) -> Any:
                 if n not in cache:
-                    cache[n] = bc.preview_best(m, side, n).why
+                    cache[n] = bc.preview_best(m, side, n, max_price=max_price).why
                 return cache[n]
 
-            out["view"] = spend_view(m, side, spend, price, failed=failed, collar=collar)
+            out["view"] = spend_view(m, side, spend, price, failed=failed, collar=collar, max_price=max_price)
 
     Client(mode="backtest", books=sorted(books, key=lambda b: b.as_of), store=":memory:", rules=rules, on_alert=lambda e: None).replay(on_book)
     return out["view"]

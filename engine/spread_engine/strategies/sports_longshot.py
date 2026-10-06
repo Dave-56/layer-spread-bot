@@ -8,7 +8,7 @@ from . import SPORTS, NoTrade, Signal, cheapest, event, game_winner, outcome, pr
 
 NAME = "Longshot under 20¢"
 CATEGORY = SPORTS
-DESCRIPTION = "Next game first: buys 100 YES on an underdog priced under 20¢, paying at most 20¢. Most longshots lose."
+DESCRIPTION = "Next game first: puts $50 on YES for an underdog priced under 20¢, paying at most 20¢. Most longshots lose."
 EXAMPLE = True
 ORDER = 20
 LAYER_CATEGORIES = ("sports",)
@@ -23,5 +23,5 @@ def decide(matches: list[Match], client: Client) -> Signal | NoTrade:
     for m, p in priced(games, client):
         yes = cheapest(p, "yes")
         if yes is not None and yes < MAX:
-            return Signal(m, "yes", 100, max_price=MAX, why=f"{outcome(m)} is a longshot in {event(m)}: YES costs {price_words(yes)}.")
+            return Signal(m, "yes", 50, max_price=MAX, why=f"{outcome(m)} is a longshot in {event(m)}: YES costs {price_words(yes)}.")
     return NoTrade("None of the next games has a side priced under 20¢ right now.")
