@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { skipText } from "@/components/format";
-import { alreadyExists, bestHeadline, DEFAULT_HOW, everyCell, everyOrder, everySummary, HOW, matchNote, ruleTitle, strategyNoTrade } from "@/components/headlines";
+import { alreadyExists, bestHeadline, DEFAULT_HOW, everyCell, everyOrder, everySummary, HOW, marketName, matchNote, ruleTitle, strategyNoTrade } from "@/components/headlines";
 import type { BestResult, CompareView, EveryOutcome, EveryRow, VenueRow } from "@/lib/engine";
 
 const row = (v: Partial<VenueRow>): VenueRow => ({
@@ -227,8 +227,23 @@ describe("every market", () => {
     const rows = [every("kalshi", { ...dollars, more: 2 }), every("polymarket_us", { ...dollars, more: 10 }), every("same", { ...dollars, more: 0 })];
     expect(rows.sort(everyOrder).map((r) => r.best.compare?.more)).toEqual([10, 2, 0]);
     const counts = { kalshi: 2, polymarket_us: 17, same: 3, one_venue: 1, neither: 0, error: 2 };
-    expect(everySummary(counts, 25, true)).toBe("Checked 25 markets. Kalshi pays more on 2, Polymarket US on 17, same payout on 3. 3 couldn't be priced on both venues.");
-    expect(everySummary({ ...counts, kalshi: 0 }, 23, true)).toBe("Checked 23 markets. Polymarket US pays more on 17, same payout on 3. 3 couldn't be priced on both venues.");
+    expect(everySummary(counts, 25, "$50")).toBe("Checked 25 markets. Kalshi pays more on 2, Polymarket US on 17, same payout on 3. On 1, only one venue or neither could take $50. 2 couldn't be checked.");
+    expect(everySummary({ ...counts, kalshi: 0, error: 0 }, 21, "$50")).toBe("Checked 21 markets. Polymarket US pays more on 17, same payout on 3. On 1, only one venue or neither could take $50.");
+  });
+  it("in dollars: a venue whose book can't take the amount leaves only the other", () => {
+    const line = "Polymarket US can't take $50: it has only $1.05 for sale near its price.";
+    const r = every("one_venue", { spend: 50, spend_label: "$50", cheaper_name: "Kalshi", venues: [kalshi({ cheaper: true }), pm({ ok: false, skip: "not_enough_size", skip_line: line })] });
+    expect(everyCell(r)).toEqual({ title: "Only Kalshi can take $50", detail: line });
+  });
+});
+
+describe("marketName", () => {
+  it("is the outcome, or for a yes/no market the question", () => {
+    const kalshi = { question: "Will Missouri Proposition A pass?" };
+    expect(marketName({ outcome: "Florida US Senate", title: "Closer Senate Race", kalshi })).toBe("Florida US Senate");
+    expect(marketName({ outcome: "Yes", title: "Will Missouri approve HB 1's congressional map? — In 2026", kalshi })).toBe("Will Missouri Proposition A pass?");
+    expect(marketName({ outcome: "Yes", title: "Will it pass?", kalshi: { question: null } })).toBe("Will it pass?");
+    expect(marketName({ outcome: null, title: "Will it pass?" })).toBe("Will it pass?");
   });
 });
 

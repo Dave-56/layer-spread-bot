@@ -2,7 +2,7 @@
 // uselayer SDK, named in engine/spread_engine/views.py); these functions pick and word them, they
 // never compute a price or a fee.
 
-import type { CompareView, EveryOutcome, EveryRow, VenueRow } from "@/lib/engine";
+import type { CompareView, EveryOutcome, EveryRow, MatchView, VenueRow } from "@/lib/engine";
 import { count, money, side } from "./format";
 
 export interface Headline {
@@ -84,6 +84,12 @@ export function strategyNoTrade(r: { started?: number; looked?: { reason: string
   return "Nothing fit this strategy's rules. Compare one below yourself.";
 }
 
+/** A match's name for a row: its outcome, or for a yes/no market (outcome "Yes") the question it asks. */
+export function marketName(m: Pick<MatchView, "outcome" | "title"> & { kalshi?: { question: string | null } }): string {
+  if (m.outcome && !/^(yes|no)$/i.test(m.outcome.trim())) return m.outcome;
+  return m.kalshi?.question || m.title;
+}
+
 // ---- Every market ---------------------------------------------------------------------------------
 
 /** One row's answer, for the "Pays more for $50 on YES" column: who, then by how much or why not. */
@@ -102,7 +108,8 @@ export function everyCell(r: EveryRow): Headline {
   }
   if (r.outcome === "kalshi" || r.outcome === "polymarket_us") return { title: c.cheaper_name ?? "", detail: `${savingWords(c)} cheaper` };
   if (r.outcome === "same") return { title: "Same price", detail: `${money(c.venues.find((v) => v.cheaper)?.total_cost)} on each` };
-  if (r.outcome === "one_venue") return { title: `Only ${c.cheaper_name}`, detail: skipped };
+  if (r.outcome === "one_venue")
+    return { title: c.spend != null ? `Only ${c.cheaper_name} can take ${c.spend_label}` : `Only ${c.cheaper_name}`, detail: skipped };
   return { title: "Neither venue", detail: skipped };
 }
 
@@ -115,8 +122,9 @@ export function everyOrder(a: EveryRow, b: EveryRow): number {
   return RANK[a.outcome] - RANK[b.outcome] || gap(b) - gap(a);
 }
 
-/** The scan in one sentence, from the engine's counts. ``dollars``: it compared a dollar amount. */
-export function everySummary(counts: Record<EveryOutcome, number>, total: number, dollars = false): string {
+/** The scan in one sentence, from the engine's counts. ``amount`` ("$50"): it compared a dollar amount. */
+export function everySummary(counts: Record<EveryOutcome, number>, total: number, amount: string | null = null): string {
+  const dollars = amount != null;
   const parts: string[] = [];
   const wins = dollars ? "pays more" : "is cheaper";
   if (counts.kalshi) parts.push(`Kalshi ${wins} on ${count(counts.kalshi)}`);
@@ -124,7 +132,13 @@ export function everySummary(counts: Record<EveryOutcome, number>, total: number
   if (counts.same) parts.push(`${parts.length ? "same" : "Same"} ${dollars ? "payout" : "price"} on ${count(counts.same)}`);
   const notBoth = counts.one_venue + counts.neither + counts.error;
   if (!parts.length) return `Checked ${count(total)} markets. None could be priced on both venues.`;
-  const rest = notBoth ? ` ${count(notBoth)} couldn't be priced on both venues.` : "";
+  // In dollars, "one venue" is mostly a book too thin for the amount: say that, and the unchecked apart.
+  const short = counts.one_venue + counts.neither;
+  const rest = !notBoth
+    ? ""
+    : dollars
+      ? [short && ` On ${count(short)}, only one venue or neither could take ${amount}.`, counts.error && ` ${count(counts.error)} couldn't be checked.`].filter(Boolean).join("")
+      : ` ${count(notBoth)} couldn't be priced on both venues.`;
   return `Checked ${count(total)} markets. ${parts.join(", ")}.${rest}`;
 }
 
