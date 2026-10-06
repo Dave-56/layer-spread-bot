@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Arbitrage from "@/components/Arbitrage";
 import BestVenue from "@/components/BestVenue";
-import Chat from "@/components/Chat";
 import PaperAccount from "@/components/PaperAccount";
 import type { Status } from "@/lib/engine";
 
@@ -15,7 +14,6 @@ const INTRO =
 
 export default function Page() {
   const [tab, setTab] = useState<Tab>("best");
-  const [chat, setChat] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [down, setDown] = useState(false);
 
@@ -59,13 +57,10 @@ export default function Page() {
           <span className={`mode ${mode === "live" ? "live" : ""}`} title={mode === "live" ? "Orders are real, with your own keys" : "Real books, fake money"}>
             {mode === "live" ? "LIVE" : "Paper"}
           </span>
-          <button className="btn quiet" onClick={() => setChat((c) => !c)}>
-            {chat ? "Hide chat" : "Chat"}
-          </button>
         </div>
       </header>
 
-      <div className={`layout ${chat ? "with-chat" : ""}`}>
+      <div className="layout">
         <main className="main">
           <div className="page">
             <p className="intro">{INTRO}</p>
@@ -102,7 +97,6 @@ export default function Page() {
             )}
           </div>
         </main>
-        {chat && <Chat mode={mode} onClose={() => setChat(false)} />}
       </div>
     </>
   );

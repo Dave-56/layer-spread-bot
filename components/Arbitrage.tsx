@@ -243,7 +243,7 @@ function DropGroup({ label, rows }: { label: string; rows: ScanRow[] }) {
   );
 }
 
-/** A scan's result: the answer, each survivor, then the dropped ones folded. Also used by the chat panel. */
+/** A scan's result: the answer, each survivor, then the dropped ones folded. */
 export function FunnelResult({ f, size, mode, minEdge = 0 }: { f: FunnelState; size: number; mode: "paper" | "live"; minEdge?: number }) {
   const survivors = survivorOrder(f.rows.filter((r) => r.verdict === "survivor"));
   return (

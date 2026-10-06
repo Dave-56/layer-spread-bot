@@ -1,6 +1,5 @@
 // The local engine (engine/, Python + the uselayer SDK) does every price, fee, quote and order.
-// This app only shows what it returns. The browser reaches it through /engine/* (app/engine), and
-// the chat's tools call it directly from the server.
+// This app only shows what it returns. The browser reaches it through /engine/* (app/engine).
 
 export const ENGINE_URL = process.env.ENGINE_URL ?? `http://127.0.0.1:${process.env.ENGINE_PORT ?? 8765}`;
 
@@ -45,7 +44,7 @@ export interface EngineError {
   hint: string | null;
   venue: string | null;
   unavailable?: boolean; // the venue didn't answer (busy, down): trying again can work
-  detail?: string | null; // the SDK's own words, for logs and the chat's model; never shown
+  detail?: string | null; // the SDK's own words, for logs; never shown
 }
 
 export interface Status {
@@ -407,23 +406,4 @@ export function errorText(body: unknown, status: number): string {
   if (typeof b?.error === "string") return b.error;
   if (typeof b?.detail === "string") return b.detail;
   return `The engine answered ${status}. Is it running? (npm run dev starts it.)`;
-}
-
-/** Server side: call the engine directly. */
-export async function engine<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(ENGINE_URL + path, {
-      method: init?.method ?? "GET",
-      // The engine refuses a POST without JSON and the proxy header (see lib/guard.ts).
-      headers: init?.body === undefined ? { "x-spread-proxy": "1" } : { "content-type": "application/json", "x-spread-proxy": "1" },
-      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
-      cache: "no-store",
-    });
-  } catch {
-    throw new Error(`The engine isn't running at ${ENGINE_URL}. Start it with npm run dev.`);
-  }
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(errorText(body, res.status));
-  return body as T;
 }

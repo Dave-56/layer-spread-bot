@@ -85,6 +85,8 @@ def client() -> Client:
                     # Polymarket US reads: paced, stopped after a 429, a book reused for a few seconds
                     # outside orders (reads.py). SPREAD_FAKE_BUSY works in paper mode only.
                     transport=gateway(),
+                    # Paper orders reach the book this long after they're sent, as real ones do (config.py).
+                    order_latency_s=settings.order_latency_s if settings.mode == "paper" else 0.0,
                 )
                 _client_error = None
             except VenueError as e:

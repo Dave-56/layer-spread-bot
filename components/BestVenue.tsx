@@ -35,7 +35,7 @@ import {
 // side by side, and the answer: where it's cheaper, and by how much. Nothing is sent from here.
 // Every number and label is the engine's (BestResult.compare); nothing is computed here.
 
-// ---- Used by the chat panel and the Arbitrage tab ------------------------------------------------
+// ---- Used by the Arbitrage tab too ---------------------------------------------------------------
 
 /** The SDK's comparison as one sentence, from its own numbers. */
 export function verdictLine(why: Why): string {
