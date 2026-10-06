@@ -42,6 +42,19 @@ def test_live_needs_the_exact_word(monkeypatch: pytest.MonkeyPatch) -> None:
         assert config.load().mode == mode
 
 
+def test_paper_orders_arrive_late_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from spread_engine import config
+
+    monkeypatch.delenv("BOT_ORDER_LATENCY_S", raising=False)
+    assert config.load().order_latency_s == 0.7
+    monkeypatch.setenv("BOT_ORDER_LATENCY_S", "0")
+    assert config.load().order_latency_s == 0.0
+
+
+def test_the_engine_client_gets_the_latency(engine) -> None:  # noqa: ANN001
+    assert engine.client()._latency_s == engine.settings.order_latency_s
+
+
 def test_answers_only_this_machine(engine) -> None:  # noqa: ANN001
     remote = TestClient(engine.app, client=("203.0.113.9", 5000))
     assert remote.get("/status").status_code == 403

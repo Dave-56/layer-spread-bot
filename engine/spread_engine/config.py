@@ -27,6 +27,10 @@ class Settings:
     # The bot's own store (default ~/.uselayer/spread-bot/), kept apart from any other uselayer use on
     # this machine, so resetting the paper account touches only the bot's fake trades.
     store_dir: Path
+    # Paper only: seconds from sending an order to it reaching the book (the SDK's order_latency_s).
+    # The order fills against the book it meets then, not the one it was priced on. Default 0.7 s, the
+    # median the SDK measured on Polymarket US (0.6-1.4 s over 8 orders). 0 fills instantly.
+    order_latency_s: float = 0.7
 
     @property
     def store(self) -> Path:
@@ -52,4 +56,5 @@ def load() -> Settings:
     mode = "live" if os.environ.get("BOT_MODE", "paper").strip().lower() == "live" else "paper"
     budget = float(os.environ.get("BOT_BUDGET", "100"))
     store_dir = Path(os.environ.get("BOT_STORE_DIR") or "~/.uselayer/spread-bot").expanduser()
-    return Settings(mode=mode, budget=budget, store_dir=store_dir)
+    latency = float(os.environ.get("BOT_ORDER_LATENCY_S", "0.7"))
+    return Settings(mode=mode, budget=budget, store_dir=store_dir, order_latency_s=latency)

@@ -32,8 +32,8 @@ export function when(iso: string | null | undefined): string | null {
   });
 }
 
-// The SDK's skip codes (uselayer.best) as one sentence each, for a comparison the engine didn't word
-// (the chat's raw result). The engine's own sentences (views.py) come first wherever they're there.
+// The SDK's skip codes (uselayer.best) as one sentence each, for a comparison the engine didn't word.
+// The engine's own sentences (views.py) come first wherever they're there.
 const SKIP: Record<string, (n: string) => string> = {
   switched_off: (n) => `This release doesn't trade on ${n}.`,
   no_key: (n) => `Add your ${n} key to .env to price it here.`,

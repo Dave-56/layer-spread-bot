@@ -13,8 +13,6 @@ Spread runs on your machine, with your own keys, across **Kalshi** and **Polymar
 - **Best venue.** You (by hand), your strategy, or "Every market" for a whole list decides the trade ("$50 on YES for this outcome"). Spread prices it on both venues from their live order books: how many contracts the amount buys on each, at what average price and fees, and what each pays if you win. Then it shows which venue pays more for the same money, after fees. It sends nothing.
 - **Arbitrage.** Spread scans markets that are the same bet on both venues. Buying YES on one and NO on the other pays $1 a contract either way, so a price gap looks like free money. Most gaps aren't. Every match goes through the same checks, and Spread shows why each gap was dropped: a venue has no offers, there's no gap, fees are bigger than it, the books are too thin, or the return per day is too low. For a gap that survives, you see both venues side by side, then gross gap → fees → net → return per day, and you can paper-trade both sides. When the two venues word a bet differently, Spread still checks it and shows a warning with it.
 
-An optional chat panel answers the same questions in plain English, with your own LLM key.
-
 It's paper mode by default: real order books, fake money.
 
 ## What runs where
@@ -24,8 +22,7 @@ It's paper mode by default: real order books, fake money.
 | Which markets are the same bet, and where their rules differ | Layer's hosted matching (`GET /v0/matches`), called by the SDK with your `LAYER_API_KEY` |
 | Venue prices and order books, fees, quotes, orders, positions, paper fills | The [uselayer](https://pypi.org/project/uselayer/) Python SDK, on your machine, talking to each venue with your own keys |
 | The engine (`engine/`): a small local service that runs the SDK for the app | Your machine, `127.0.0.1:8765`. It answers only this machine. |
-| The app (`app/`, `components/`): the two screens and the chat | Your machine, `127.0.0.1:3200` |
-| The chat's answers | The LLM you choose (Anthropic or OpenRouter), with your key |
+| The app (`app/`, `components/`): the two screens | Your machine, `127.0.0.1:3200` |
 
 Nothing is hosted and nothing is deployed. Layer gets your Layer API key, the market ids it gave you, and search words. It never sees prices, orders, positions or venue keys. The SDK checks every Layer request against that list before it leaves your machine.
 
@@ -50,7 +47,6 @@ Keys in `.env`:
 | `LAYER_API_KEY` | Which markets are the same bet | [uselayer.sh](https://uselayer.sh) |
 | `KALSHI_KEY_ID`, `KALSHI_PRIVATE_KEY_PATH` | Reading Kalshi's order books (a read-only key is enough for paper mode) | Kalshi account settings → API keys |
 | `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY` | Live orders, and **Save prices** for Replay (its live stream is read with your key; nothing is traded). Otherwise paper mode reads Polymarket US's public books without a key. | polymarket.us/developer |
-| `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | The optional chat panel | console.anthropic.com, or openrouter.ai |
 
 ## Try it in paper mode
 
@@ -116,7 +112,7 @@ A strategy file is your own Python, run by the engine on your machine with your 
 
 ## Paper and live
 
-- **Paper (the default).** Orders fill against the venues' real order books with fake money, in the bot's own store (`~/.uselayer/spread-bot/paper.db`, or `BOT_STORE_DIR`). Nothing reaches a venue. The "Paper account" line on the Arbitrage screen shows what's open and how much of your limit it uses; "Reset" starts the fake account over.
+- **Paper (the default).** Orders fill against the venues' real order books with fake money, in the bot's own store (`~/.uselayer/spread-bot/paper.db`, or `BOT_STORE_DIR`). Nothing reaches a venue. A paper order reaches the book 0.7 seconds after it's sent, about how long a real Polymarket US order took (0.6–1.4 s), and fills against the book it meets then, so a gap that closes in that time is missed, as it would be live. `BOT_ORDER_LATENCY_S` changes the delay; `0` fills instantly. Spread's orders never wait at a price: each fills right away or is cancelled. A resting order (one left on the book at your price) is an SDK feature Spread doesn't use yet; in paper mode its place in line is only an estimate, because the venues publish the total waiting at each price, not single orders. The "Paper account" line on the Arbitrage screen shows what's open and how much of your limit it uses; "Reset" starts the fake account over.
 - **Live.** Set `BOT_MODE=live` in `.env` and add the key for each venue you'll trade, then restart. Orders are then real, with your money. The header shows a red LIVE badge. Only the exact word `live` turns it on. If your account already has orders or positions, the SDK starts a new live store with its kill switch on: check them, then run `uv run python -m uselayer resume --mode live` in `engine/`.
 - Live or paper, every order goes through the SDK's guardrails: a budget across everything (`BOT_BUDGET`, default $100), a price collar, and a kill switch. To stop everything from any terminal: `cd engine && uv run python -m uselayer kill --mode paper --store ~/.uselayer/spread-bot/paper.db` (or `live.db` with `--mode live`).
 - A comparison is a snapshot of both books when you ran it. A book can move before an order arrives. The order's limit price caps what it can pay, and it's immediate-or-cancel: it fills what's there at that price, and the rest is cancelled. The arbitrage trade reads both books again first and sends nothing if the gap is gone.
